@@ -1,0 +1,122 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(du:*)",
+      "Bash(unzip:*)",
+      "Bash(netstat -ano)",
+      "Read(//c/Projects/**)",
+      "Read(//c/Users/**)",
+      "Read(//c/ProgramData/**)",
+      "Read(//tmp/**)",
+      "Bash(svn status:*)",
+      "Bash(svn diff:*)",
+      "Bash(svn log:*)",
+      "Bash(svn info:*)",
+      "Bash(svn revert:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet nuget list:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git add:*)",
+      "Bash(git init)",
+      "Bash(git remote add:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push -u:*)",
+      "Bash(openclaw:*)",
+      "Bash(ngrok:*)",
+      "Bash(npx ngrok:*)",
+      "Bash(npm install:*)",
+      "Bash(curl -s:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:www.answeroverflow.com)",
+      "Bash(~/.bashrc)",
+      "Bash(source ~/.bashrc)",
+      "Bash(npx -y @anthropic-ai/mcp-playwright --help)",
+      "Bash(npx -y @playwright/mcp@latest --help)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\holylight\\.claude",
+      "C:\\Users\\holylight\\.claude\\projects\\c--",
+      "C:\\OpenClawWorkspace\\atoms",
+      "C:\\Users\\holylight\\.claude\\projects\\c--Projects\\memory",
+      "C:\\Users\\holylight",
+      "\\tmp"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/workflow-guardian.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/workflow-guardian.py\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/workflow-guardian.py\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/workflow-guardian.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/workflow-guardian.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/workflow-guardian.py\"",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "autoUpdatesChannel": "latest"
+}

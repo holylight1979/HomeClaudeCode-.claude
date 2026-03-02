@@ -1,0 +1,32 @@
+# ─── Credentials & Auth (NEVER commit) ───────────────────
+.credentials.json
+
+# ─── Runtime state (session-specific, auto-generated) ────
+backups/
+cache/
+debug/
+downloads/
+file-history/
+ide/
+plans/
+plugins/
+projects/
+session-env/
+shell-snapshots/
+statsig/
+telemetry/
+todos/
+
+# ─── Runtime cache files ─────────────────────────────────
+mcp-needs-auth-cache.json
+stats-cache.json
+
+# ─── Workflow Guardian runtime state ─────────────────────
+# config.json IS tracked; state files are not
+workflow/state-*.json
+
+# ─── OS / Editor ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~

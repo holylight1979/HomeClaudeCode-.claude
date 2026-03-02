@@ -1,0 +1,835 @@
+#!/usr/bin/env python3
+"""
+memory-audit.py — Atomic Memory System Health Checker
+
+掃描 Claude Code 記憶層（全域 + 專案），驗證 atom 格式、
+檢查過期、建議晉升/降級、驗證索引一致性、偵測重複。
+
+Usage:
+    python memory-audit.py
+    python memory-audit.py --global-only
+    python memory-audit.py --project c--Projects
+    python memory-audit.py --search-distant handler
+    python memory-audit.py --restore path/to/atom.md
+    python memory-audit.py --move-distant path/to/atom.md
+    python memory-audit.py --json
+
+Requirements: Python 3.8+, no external dependencies.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import sys
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
+
+# ─── Constants ───────────────────────────────────────────────────────────────
+
+STALENESS_THRESHOLDS: Dict[str, int] = {"[固]": 90, "[觀]": 60, "[臨]": 30}
+PROMOTION_THRESHOLDS: Dict[str, int] = {"[臨]": 2, "[觀]": 4}
+INDEX_MAX_LINES = 30
+ATOM_MAX_LINES = 200
+TRIGGER_MIN = 3
+TRIGGER_MAX = 8
+MEMORY_INDEX = "MEMORY.md"
+DISTANT_DIR = "_distant"
+SKIP_PREFIXES = ("SPEC_", "_")  # Files to skip during atom scanning
+REQUIRED_METADATA = {"Scope", "Confidence", "Trigger", "Last-used"}
+OPTIONAL_METADATA = {"Confirmations", "Privacy", "Source"}
+REQUIRED_SECTIONS = {"知識", "行動"}
+VALID_CONFIDENCE = {"[固]", "[觀]", "[臨]"}
+
+# ─── Data Classes ────────────────────────────────────────────────────────────
+
+
+@dataclass
+class AtomMetadata:
+    file_path: Path
+    layer_name: str
+    title: str = ""
+    scope: str = ""
+    confidence: str = ""
+    trigger: List[str] = field(default_factory=list)
+    last_used: Optional[date] = None
+    confirmations: int = 0
+    privacy: str = ""
+    source: str = ""
+    line_count: int = 0
+    sections_found: Set[str] = field(default_factory=set)
+    has_evolution_log: bool = False
+    evolution_entries: int = 0
+    raw_metadata: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class IndexEntry:
+    atom_name: str
+    path: str
+    trigger: str
+    confidence: str = ""
+
+
+@dataclass
+class Issue:
+    file: str
+    level: str  # "error", "warning", "info"
+    category: str
+    message: str
+
+
+@dataclass
+class Suggestion:
+    file: str
+    current: str
+    suggested: str
+    reason: str
+
+
+@dataclass
+class DuplicatePair:
+    file_a: str
+    file_b: str
+    shared_triggers: List[str]
+    title_match: bool
+
+
+@dataclass
+class HealthReport:
+    scan_date: date = field(default_factory=date.today)
+    layers_scanned: List[str] = field(default_factory=list)
+    total_atoms: int = 0
+    confidence_counts: Dict[str, int] = field(default_factory=dict)
+    issues: List[Issue] = field(default_factory=list)
+    promotions: List[Suggestion] = field(default_factory=list)
+    demotions: List[Suggestion] = field(default_factory=list)
+    duplicates: List[DuplicatePair] = field(default_factory=list)
+    distant_count: int = 0
+
+
+# ─── Parsing ─────────────────────────────────────────────────────────────────
+
+META_PATTERN = re.compile(r"^-\s+([\w-]+):\s*(.+)$")
+SECTION_PATTERN = re.compile(r"^##\s+(.+)$")
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+TABLE_ROW_PATTERN = re.compile(r"^\|(.+)\|$")
+CONFIDENCE_EXTRACT = re.compile(r"\[(固|觀|臨)\]")
+
+
+def parse_atom_file(path: Path, layer_name: str) -> AtomMetadata:
+    """Parse a .md atom file into AtomMetadata."""
+    atom = AtomMetadata(file_path=path, layer_name=layer_name)
+    try:
+        text = path.read_text(encoding="utf-8-sig")  # handles BOM
+    except (OSError, UnicodeDecodeError):
+        return atom
+
+    lines = text.splitlines()
+    atom.line_count = len(lines)
+
+    # Title (first # heading)
+    for line in lines:
+        if line.startswith("# ") and not line.startswith("## "):
+            atom.title = line[2:].strip()
+            break
+
+    # Metadata block (lines starting with "- Key: Value")
+    in_meta = False
+    for line in lines:
+        if line.startswith("- "):
+            m = META_PATTERN.match(line)
+            if m:
+                key, val = m.group(1), m.group(2).strip()
+                atom.raw_metadata[key] = val
+                in_meta = True
+        elif in_meta and line.strip() == "":
+            break  # end of metadata block
+
+    # Extract structured fields
+    atom.scope = atom.raw_metadata.get("Scope", "")
+    raw_conf = atom.raw_metadata.get("Confidence", "")
+    cm = CONFIDENCE_EXTRACT.search(raw_conf)
+    atom.confidence = f"[{cm.group(1)}]" if cm else raw_conf
+
+    raw_trigger = atom.raw_metadata.get("Trigger", "")
+    atom.trigger = [t.strip() for t in re.split(r"[,，]", raw_trigger) if t.strip()]
+
+    raw_date = atom.raw_metadata.get("Last-used", "").strip()
+    if DATE_PATTERN.match(raw_date):
+        try:
+            atom.last_used = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    raw_conf_count = atom.raw_metadata.get("Confirmations", "0")
+    try:
+        atom.confirmations = int(raw_conf_count)
+    except ValueError:
+        atom.confirmations = 0
+
+    atom.privacy = atom.raw_metadata.get("Privacy", "")
+    atom.source = atom.raw_metadata.get("Source", "")
+
+    # Sections
+    for line in lines:
+        sm = SECTION_PATTERN.match(line)
+        if sm:
+            section_name = sm.group(1).strip()
+            atom.sections_found.add(section_name)
+            if "演化日誌" in section_name:
+                atom.has_evolution_log = True
+
+    # Count evolution log entries
+    if atom.has_evolution_log:
+        in_log = False
+        for line in lines:
+            if "演化日誌" in line:
+                in_log = True
+                continue
+            if in_log and TABLE_ROW_PATTERN.match(line):
+                cells = [c.strip() for c in line.split("|") if c.strip()]
+                if len(cells) >= 2 and DATE_PATTERN.match(cells[0]):
+                    atom.evolution_entries += 1
+
+    return atom
+
+
+def parse_memory_index(path: Path) -> Tuple[List[IndexEntry], int]:
+    """Parse MEMORY.md index file. Returns (entries, line_count)."""
+    entries: List[IndexEntry] = []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return entries, 0
+
+    lines = text.splitlines()
+    line_count = len(lines)
+
+    # Find the table
+    in_table = False
+    header_seen = False
+    for line in lines:
+        stripped = line.strip()
+        if not in_table:
+            if stripped.startswith("| Atom") or stripped.startswith("|Atom"):
+                in_table = True
+                header_seen = True
+                continue
+        else:
+            if stripped.startswith("|---") or stripped.startswith("| ---"):
+                continue  # separator
+            if not stripped.startswith("|"):
+                break  # end of table
+            cells = [c.strip() for c in stripped.split("|")]
+            cells = [c for c in cells if c]  # remove empties from leading/trailing |
+            if len(cells) >= 3:
+                entry = IndexEntry(
+                    atom_name=cells[0],
+                    path=cells[1],
+                    trigger=cells[2],
+                    confidence=cells[3] if len(cells) >= 4 else "",
+                )
+                entries.append(entry)
+
+    return entries, line_count
+
+
+# ─── Validation ──────────────────────────────────────────────────────────────
+
+
+def validate_format(atom: AtomMetadata) -> List[Issue]:
+    """Validate atom file format compliance."""
+    issues: List[Issue] = []
+    rel = _rel_path(atom.file_path)
+
+    # Title
+    if not atom.title:
+        issues.append(Issue(rel, "error", "format", "缺少 # 標題"))
+
+    # Required metadata
+    for key in REQUIRED_METADATA:
+        if key not in atom.raw_metadata:
+            issues.append(Issue(rel, "error", "format", f"缺少必要欄位: {key}"))
+
+    # Confidence value
+    if atom.confidence and atom.confidence not in VALID_CONFIDENCE:
+        issues.append(
+            Issue(rel, "error", "format", f"Confidence 值無效: {atom.confidence}（應為 [固]/[觀]/[臨]）")
+        )
+
+    # Last-used date
+    if "Last-used" in atom.raw_metadata and atom.last_used is None:
+        issues.append(
+            Issue(rel, "warning", "format", f"Last-used 日期格式無效: {atom.raw_metadata['Last-used']}")
+        )
+
+    # Required sections
+    for section in REQUIRED_SECTIONS:
+        if section not in atom.sections_found:
+            issues.append(Issue(rel, "warning", "format", f"缺少建議區段: ## {section}"))
+
+    # Line count
+    if atom.line_count > ATOM_MAX_LINES:
+        issues.append(
+            Issue(rel, "warning", "size", f"Atom 超過 {ATOM_MAX_LINES} 行（目前 {atom.line_count} 行）")
+        )
+
+    # Trigger count
+    trigger_count = len(atom.trigger)
+    if trigger_count > 0 and (trigger_count < TRIGGER_MIN or trigger_count > TRIGGER_MAX):
+        issues.append(
+            Issue(rel, "info", "trigger", f"Trigger 數量 {trigger_count}（建議 {TRIGGER_MIN}~{TRIGGER_MAX}）")
+        )
+
+    return issues
+
+
+def check_staleness(atom: AtomMetadata, today: date) -> Optional[Suggestion]:
+    """Check if atom is stale based on Last-used date."""
+    if not atom.last_used or not atom.confidence:
+        return None
+
+    threshold = STALENESS_THRESHOLDS.get(atom.confidence)
+    if threshold is None:
+        return None
+
+    days = (today - atom.last_used).days
+    if days <= threshold:
+        return None
+
+    rel = _rel_path(atom.file_path)
+    if atom.confidence == "[臨]":
+        return Suggestion(rel, atom.confidence, "遙遠記憶", f"Last-used {days} 天前（閾值 {threshold}天）")
+    elif atom.confidence == "[觀]":
+        return Suggestion(rel, atom.confidence, "確認或遙遠記憶", f"Last-used {days} 天前（閾值 {threshold}天）")
+    else:  # [固]
+        return Suggestion(rel, atom.confidence, "建議人工檢視", f"Last-used {days} 天前（閾值 {threshold}天）")
+
+
+def suggest_promotions(atom: AtomMetadata) -> Optional[Suggestion]:
+    """Suggest promotion based on confirmations count."""
+    threshold = PROMOTION_THRESHOLDS.get(atom.confidence)
+    if threshold is None:
+        return None
+
+    if atom.confirmations < threshold:
+        return None
+
+    rel = _rel_path(atom.file_path)
+    if atom.confidence == "[臨]":
+        return Suggestion(
+            rel, "[臨]", "[觀]", f"{atom.confirmations} confirmations（閾值 {threshold}）"
+        )
+    elif atom.confidence == "[觀]":
+        return Suggestion(
+            rel, "[觀]", "[固]", f"{atom.confirmations} confirmations（閾值 {threshold}）"
+        )
+    return None
+
+
+def validate_index(index_path: Path, memory_dir: Path, index_entries: List[IndexEntry]) -> List[Issue]:
+    """Cross-reference index entries with actual files."""
+    issues: List[Issue] = []
+    rel_index = _rel_path(index_path)
+
+    # Get actual atom files (exclude MEMORY.md, SPEC_*, _distant/)
+    actual_files: Set[str] = set()
+    for f in memory_dir.iterdir():
+        if f.is_file() and f.suffix == ".md" and f.name != MEMORY_INDEX:
+            if not any(f.name.startswith(p) for p in SKIP_PREFIXES):
+                actual_files.add(f.name)
+
+    # Check index → file
+    indexed_files: Set[str] = set()
+    for entry in index_entries:
+        entry_path = Path(entry.path)
+        file_name = entry_path.name
+        indexed_files.add(file_name)
+
+        full_path = memory_dir / file_name
+        if not full_path.exists():
+            # Try relative to parent of memory_dir
+            alt_path = memory_dir.parent / entry.path
+            if not alt_path.exists():
+                issues.append(
+                    Issue(rel_index, "error", "index", f"索引指向不存在的檔案: {entry.path}")
+                )
+
+    # Check file → index
+    for fname in actual_files:
+        if fname not in indexed_files:
+            issues.append(
+                Issue(rel_index, "warning", "index", f"檔案 {fname} 未在索引中列出")
+            )
+
+    return issues
+
+
+def detect_duplicates(all_atoms: List[AtomMetadata]) -> List[DuplicatePair]:
+    """Detect potential duplicate atoms across layers."""
+    pairs: List[DuplicatePair] = []
+
+    for i in range(len(all_atoms)):
+        for j in range(i + 1, len(all_atoms)):
+            a, b = all_atoms[i], all_atoms[j]
+            # Same layer skip
+            if a.file_path.parent == b.file_path.parent:
+                continue
+
+            # Title match
+            title_match = (
+                a.title and b.title and _normalize(a.title) == _normalize(b.title)
+            )
+
+            # Trigger overlap
+            set_a = {t.lower() for t in a.trigger}
+            set_b = {t.lower() for t in b.trigger}
+            shared = set_a & set_b
+
+            if title_match or len(shared) >= 3:
+                pairs.append(
+                    DuplicatePair(
+                        _rel_path(a.file_path),
+                        _rel_path(b.file_path),
+                        sorted(shared),
+                        title_match,
+                    )
+                )
+
+    return pairs
+
+
+# ─── Distant Memory Operations ───────────────────────────────────────────────
+
+
+def search_distant(memory_dir: Path, keyword: str) -> List[Tuple[Path, str]]:
+    """Search _distant/ subdirectories for atoms matching keyword."""
+    results: List[Tuple[Path, str]] = []
+    distant_dir = memory_dir / DISTANT_DIR
+
+    if not distant_dir.exists():
+        return results
+
+    kw_lower = keyword.lower()
+    for year_month_dir in sorted(distant_dir.iterdir()):
+        if not year_month_dir.is_dir():
+            continue
+        for md_file in sorted(year_month_dir.glob("*.md")):
+            try:
+                text = md_file.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if kw_lower in text.lower() or kw_lower in md_file.stem.lower():
+                # Extract title
+                title = ""
+                for line in text.splitlines():
+                    if line.startswith("# ") and not line.startswith("## "):
+                        title = line[2:].strip()
+                        break
+                results.append((md_file, title or md_file.stem))
+
+    return results
+
+
+def restore_from_distant(atom_path: Path) -> Tuple[bool, str]:
+    """Move atom from _distant/ back to active area, reset Confidence to [臨]."""
+    if not atom_path.exists():
+        return False, f"檔案不存在: {atom_path}"
+
+    # Find the memory/ dir (go up until we leave _distant)
+    parts = atom_path.parts
+    distant_idx = None
+    for i, p in enumerate(parts):
+        if p == DISTANT_DIR:
+            distant_idx = i
+            break
+
+    if distant_idx is None:
+        return False, f"路徑不在 _distant/ 下: {atom_path}"
+
+    memory_dir = Path(*parts[:distant_idx])
+    dest = memory_dir / atom_path.name
+
+    if dest.exists():
+        return False, f"活躍區已有同名檔案: {dest}"
+
+    # Read, reset Confidence, write to dest
+    try:
+        text = atom_path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as e:
+        return False, f"讀取失敗: {e}"
+
+    # Reset confidence to [臨]
+    text = re.sub(
+        r"^(-\s+Confidence:\s*).*$",
+        r"\g<1>[臨]",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    # Update Last-used to today
+    today_str = date.today().isoformat()
+    text = re.sub(
+        r"^(-\s+Last-used:\s*).*$",
+        rf"\g<1>{today_str}",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    # Reset confirmations
+    text = re.sub(
+        r"^(-\s+Confirmations:\s*).*$",
+        r"\g<1>0",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    try:
+        dest.write_text(text, encoding="utf-8")
+        atom_path.unlink()
+        # Clean up empty year_month dir
+        parent = atom_path.parent
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+        return True, f"已拉回: {dest}（Confidence 重置為 [臨]）"
+    except OSError as e:
+        return False, f"寫入失敗: {e}"
+
+
+def move_to_distant(atom_path: Path) -> Tuple[bool, str]:
+    """Move an active atom to _distant/{year}_{month}/."""
+    if not atom_path.exists():
+        return False, f"檔案不存在: {atom_path}"
+
+    memory_dir = atom_path.parent
+    today = date.today()
+    year_month = f"{today.year}_{today.month:02d}"
+    distant_target = memory_dir / DISTANT_DIR / year_month
+
+    distant_target.mkdir(parents=True, exist_ok=True)
+    dest = distant_target / atom_path.name
+
+    if dest.exists():
+        return False, f"遙遠記憶已有同名檔案: {dest}"
+
+    try:
+        shutil.move(str(atom_path), str(dest))
+        return True, f"已移入遙遠記憶: {dest}"
+    except OSError as e:
+        return False, f"移動失敗: {e}"
+
+
+# ─── Layer Discovery ─────────────────────────────────────────────────────────
+
+CLAUDE_DIR = Path.home() / ".claude"
+
+
+def discover_layers(
+    global_only: bool = False, project_filter: Optional[str] = None
+) -> List[Tuple[str, Path]]:
+    """Discover all memory layers."""
+    layers: List[Tuple[str, Path]] = []
+
+    # Global layer
+    global_mem = CLAUDE_DIR / "memory"
+    if global_mem.is_dir():
+        layers.append(("global", global_mem))
+
+    if global_only:
+        return layers
+
+    # Project layers
+    projects_dir = CLAUDE_DIR / "projects"
+    if projects_dir.is_dir():
+        for proj_dir in sorted(projects_dir.iterdir()):
+            if not proj_dir.is_dir():
+                continue
+
+            if project_filter and project_filter not in proj_dir.name:
+                continue
+
+            mem_dir = proj_dir / "memory"
+            if mem_dir.is_dir():
+                layers.append((proj_dir.name, mem_dir))
+
+    return layers
+
+
+# ─── Report Generation ───────────────────────────────────────────────────────
+
+
+def generate_markdown_report(report: HealthReport) -> str:
+    """Generate a Markdown health report."""
+    lines: List[str] = []
+    lines.append("# Atomic Memory Health Report")
+    lines.append(f"> Generated: {report.scan_date.isoformat()}")
+    lines.append("")
+
+    # Summary
+    errors = sum(1 for i in report.issues if i.level == "error")
+    warnings = sum(1 for i in report.issues if i.level == "warning")
+    conf_str = " | ".join(f"{k}: {v}" for k, v in sorted(report.confidence_counts.items()))
+
+    lines.append("## Summary")
+    lines.append(f"- Layers: {len(report.layers_scanned)} ({', '.join(report.layers_scanned)})")
+    lines.append(f"- Active atoms: {report.total_atoms} | Distant: {report.distant_count}")
+    lines.append(f"- {conf_str}" if conf_str else "- (no atoms)")
+    lines.append(f"- Errors: {errors} | Warnings: {warnings}")
+    lines.append(f"- Promotion candidates: {len(report.promotions)} | Demotion candidates: {len(report.demotions)}")
+    if report.duplicates:
+        lines.append(f"- Duplicate suspects: {len(report.duplicates)}")
+    lines.append("")
+
+    # Issues
+    if report.issues:
+        lines.append("## Issues")
+        lines.append("")
+        lines.append("| Level | File | Category | Message |")
+        lines.append("|-------|------|----------|---------|")
+        for i in report.issues:
+            lines.append(f"| {i.level} | {i.file} | {i.category} | {i.message} |")
+        lines.append("")
+
+    # Staleness / Demotions
+    if report.demotions:
+        lines.append("## Staleness / Demotion Suggestions")
+        lines.append("")
+        lines.append("| File | Current | Suggested | Reason |")
+        lines.append("|------|---------|-----------|--------|")
+        for s in report.demotions:
+            lines.append(f"| {s.file} | {s.current} | {s.suggested} | {s.reason} |")
+        lines.append("")
+
+    # Promotions
+    if report.promotions:
+        lines.append("## Promotion Suggestions")
+        lines.append("")
+        lines.append("| File | Current → Suggested | Reason |")
+        lines.append("|------|---------------------|--------|")
+        for s in report.promotions:
+            lines.append(f"| {s.file} | {s.current}→{s.suggested} | {s.reason} |")
+        lines.append("")
+
+    # Duplicates
+    if report.duplicates:
+        lines.append("## Duplicate Suspects")
+        lines.append("")
+        lines.append("| File A | File B | Shared Triggers | Title Match |")
+        lines.append("|--------|--------|-----------------|-------------|")
+        for d in report.duplicates:
+            triggers = ", ".join(d.shared_triggers[:5])
+            lines.append(f"| {d.file_a} | {d.file_b} | {triggers} | {'Yes' if d.title_match else 'No'} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_json_report(report: HealthReport) -> str:
+    """Generate a JSON health report."""
+    data = {
+        "scan_date": report.scan_date.isoformat(),
+        "layers": report.layers_scanned,
+        "total_atoms": report.total_atoms,
+        "distant_count": report.distant_count,
+        "confidence_counts": report.confidence_counts,
+        "issues": [
+            {"file": i.file, "level": i.level, "category": i.category, "message": i.message}
+            for i in report.issues
+        ],
+        "promotions": [
+            {"file": s.file, "current": s.current, "suggested": s.suggested, "reason": s.reason}
+            for s in report.promotions
+        ],
+        "demotions": [
+            {"file": s.file, "current": s.current, "suggested": s.suggested, "reason": s.reason}
+            for s in report.demotions
+        ],
+        "duplicates": [
+            {
+                "file_a": d.file_a,
+                "file_b": d.file_b,
+                "shared_triggers": d.shared_triggers,
+                "title_match": d.title_match,
+            }
+            for d in report.duplicates
+        ],
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def _rel_path(p: Path) -> str:
+    """Return a short relative path for display."""
+    try:
+        return str(p.relative_to(CLAUDE_DIR))
+    except ValueError:
+        return str(p)
+
+
+def _normalize(s: str) -> str:
+    """Normalize string for comparison."""
+    return re.sub(r"\s+", " ", s.strip().lower())
+
+
+def _count_distant(memory_dir: Path) -> int:
+    """Count atoms in _distant/."""
+    distant_dir = memory_dir / DISTANT_DIR
+    if not distant_dir.exists():
+        return 0
+    count = 0
+    for ym_dir in distant_dir.iterdir():
+        if ym_dir.is_dir():
+            count += sum(1 for f in ym_dir.glob("*.md"))
+    return count
+
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+
+def run_audit(args: argparse.Namespace) -> HealthReport:
+    """Run the full audit and return a HealthReport."""
+    today = date.today()
+    report = HealthReport(scan_date=today)
+
+    layers = discover_layers(
+        global_only=args.global_only,
+        project_filter=args.project,
+    )
+
+    all_atoms: List[AtomMetadata] = []
+
+    for layer_name, mem_dir in layers:
+        report.layers_scanned.append(layer_name)
+        report.distant_count += _count_distant(mem_dir)
+
+        # Parse index
+        index_path = mem_dir / MEMORY_INDEX
+        if index_path.exists():
+            index_entries, idx_lines = parse_memory_index(index_path)
+
+            # Check index line count
+            if idx_lines > INDEX_MAX_LINES:
+                report.issues.append(
+                    Issue(
+                        _rel_path(index_path),
+                        "warning",
+                        "size",
+                        f"MEMORY.md {idx_lines} 行（上限 {INDEX_MAX_LINES}）",
+                    )
+                )
+
+            # Validate index ↔ files
+            report.issues.extend(validate_index(index_path, mem_dir, index_entries))
+        else:
+            report.issues.append(
+                Issue(str(mem_dir), "error", "index", "缺少 MEMORY.md 索引檔")
+            )
+
+        # Parse all atom files
+        for md_file in sorted(mem_dir.glob("*.md")):
+            if md_file.name == MEMORY_INDEX:
+                continue
+            if any(md_file.name.startswith(p) for p in SKIP_PREFIXES):
+                continue
+
+            atom = parse_atom_file(md_file, layer_name)
+            all_atoms.append(atom)
+            report.total_atoms += 1
+
+            # Count confidence
+            if atom.confidence in VALID_CONFIDENCE:
+                report.confidence_counts[atom.confidence] = (
+                    report.confidence_counts.get(atom.confidence, 0) + 1
+                )
+
+            # Validate format
+            report.issues.extend(validate_format(atom))
+
+            # Check staleness
+            stale = check_staleness(atom, today)
+            if stale:
+                report.demotions.append(stale)
+
+            # Check promotions
+            promo = suggest_promotions(atom)
+            if promo:
+                report.promotions.append(promo)
+
+    # Detect cross-layer duplicates
+    report.duplicates.extend(detect_duplicates(all_atoms))
+
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Atomic Memory System Health Checker",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # Scan options
+    parser.add_argument("--global-only", action="store_true", help="只掃描全域層")
+    parser.add_argument("--project", type=str, default=None, help="指定專案名稱過濾")
+    parser.add_argument("--json", action="store_true", help="JSON 格式輸出")
+    parser.add_argument("--verbose", action="store_true", help="含逐 atom 詳細資訊")
+
+    # Distant memory operations
+    parser.add_argument("--search-distant", type=str, metavar="KEYWORD", help="搜尋遙遠記憶區")
+    parser.add_argument("--restore", type=str, metavar="PATH", help="從遙遠記憶拉回活躍區")
+    parser.add_argument("--move-distant", type=str, metavar="PATH", help="手動移入遙遠記憶")
+
+    args = parser.parse_args()
+
+    # Handle distant memory operations
+    if args.search_distant:
+        keyword = args.search_distant
+        layers = discover_layers(global_only=args.global_only, project_filter=args.project)
+        found_any = False
+        for layer_name, mem_dir in layers:
+            results = search_distant(mem_dir, keyword)
+            if results:
+                found_any = True
+                print(f"\n[{layer_name}] _distant/ 搜尋結果:")
+                for path, title in results:
+                    print(f"  {title}")
+                    print(f"    路徑: {path}")
+        if not found_any:
+            print(f"遙遠記憶中找不到包含 '{keyword}' 的 atom。")
+        return
+
+    if args.restore:
+        path = Path(args.restore)
+        ok, msg = restore_from_distant(path)
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    if args.move_distant:
+        path = Path(args.move_distant)
+        ok, msg = move_to_distant(path)
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    # Run audit
+    report = run_audit(args)
+
+    if args.json:
+        print(generate_json_report(report))
+    else:
+        print(generate_markdown_report(report))
+
+    # Exit code: 1 if any errors
+    has_errors = any(i.level == "error" for i in report.issues)
+    sys.exit(1 if has_errors else 0)
+
+
+if __name__ == "__main__":
+    main()
