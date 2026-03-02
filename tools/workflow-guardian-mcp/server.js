@@ -678,17 +678,25 @@ const httpServer = http.createServer((req, res) => {
   res.end("Not found");
 });
 
-// Start HTTP dashboard (non-blocking, errors silently ignored)
-httpServer.listen(DASHBOARD_PORT, "127.0.0.1", () => {
-  // Dashboard ready (logged to stderr so it doesn't interfere with MCP stdio)
-  process.stderr.write(
-    `[workflow-guardian] Dashboard: http://127.0.0.1:${DASHBOARD_PORT}\n`
-  );
+// Start HTTP dashboard — probe first, only bind if no existing instance
+const probe = http.request(
+  { hostname: "127.0.0.1", port: DASHBOARD_PORT, path: "/", method: "HEAD", timeout: 500 },
+  () => {
+    // Got response → another instance already serves the dashboard
+    process.stderr.write(`[workflow-guardian] Dashboard already running on :${DASHBOARD_PORT}, skipping.\n`);
+    probe.destroy();
+  }
+);
+probe.on("error", () => {
+  // Connection refused → port is free, bind it
+  httpServer.listen(DASHBOARD_PORT, "127.0.0.1", () => {
+    process.stderr.write(`[workflow-guardian] Dashboard: http://127.0.0.1:${DASHBOARD_PORT}\n`);
+  });
+  httpServer.on("error", (err) => {
+    process.stderr.write(`[workflow-guardian] Dashboard failed: ${err.message}\n`);
+  });
 });
-httpServer.on("error", (err) => {
-  // Port in use or other error; MCP still works without dashboard
-  process.stderr.write(`[workflow-guardian] Dashboard failed: ${err.message}\n`);
-});
+probe.end();
 
 // Keep MCP alive
 process.stdin.resume();
