@@ -1,7 +1,8 @@
-# 原子記憶系統規格 v1.0
+# 原子記憶系統規格 v2.0
 
-> Atomic Memory System Specification
+> Atomic Memory System V2 Specification
 > 適用於 Claude Code 跨 session 知識管理。
+> V2：Hybrid RECALL — Keyword Trigger + Vector Semantic Search + Local LLM
 
 ---
 
@@ -326,8 +327,85 @@ TRIGGER_RANGE = (3, 8)
 
 ---
 
-## 六、版本紀錄
+## 七、向量搜尋層（RAG）
+
+### 7.1 概述
+
+向量搜尋作為 keyword trigger 的**補充層**（非替換），提升語意相關但用詞不同的 atom 觸發率。
+
+架構：**Hybrid RECALL** — keyword matching（確定性、10ms）+ semantic search（概率性、200-500ms）並行。
+
+### 7.2 元件
+
+| 元件 | 位置 | 用途 |
+|------|------|------|
+| Memory Vector Service | `tools/memory-vector-service/service.py` | HTTP daemon @ port 3849 |
+| indexer.py | 同目錄 | 段落級 atom chunking + embedding + ChromaDB |
+| searcher.py | 同目錄 | 語意搜尋 |
+| reranker.py | 同目錄 | LLM re-ranking / query rewrite / 知識萃取 |
+| rag-engine.py | `tools/rag-engine.py` | CLI 入口 |
+| ChromaDB | `memory/_vectordb/` | 向量持久化存儲 |
+
+### 7.3 Embedding 模型（雙軌）
+
+| 後端 | 模型 | 用途 |
+|------|------|------|
+| Ollama | `qwen3-embedding` | 主力（MTEB 多語言 #1） |
+| sentence-transformers | `BAAI/bge-m3` | Fallback（Ollama 未啟動時） |
+
+### 7.4 索引策略
+
+- **段落級切割**：每個 `- ` bullet point 為一個 chunk（向量化單位）
+- 元資料區（Scope/Confidence/Trigger）和演化日誌不索引
+- 每個 chunk 攜帶 metadata：atom_name, section, confidence, layer, file_hash
+- 增量索引：比對 file_hash，只重新索引有變動的 atom
+- PostToolUse hook 自動觸發增量索引
+
+### 7.5 搜尋流程
+
+```
+UserPromptSubmit (3s timeout)
+├─ keyword match (existing, ~10ms)
+├─ HTTP → Vector Service (~200-500ms, timeout 2s)
+├─ merge & deduplicate (keyword 優先)
+└─ load atoms within token budget
+```
+
+### 7.6 本地 LLM 功能（離線路徑）
+
+| 功能 | 模型 | 觸發 | 延遲 |
+|------|------|------|------|
+| 查詢改寫 | qwen3:4b | `rag-engine.py search --enhanced` | ~2s |
+| Re-ranking | qwen3:4b | `rag-engine.py search --rerank` | ~4s |
+| 知識萃取 | qwen3:4b | session 結束同步 | ~3s |
+
+### 7.7 設定
+
+`~/.claude/workflow/config.json` 的 `vector_search` 區塊：
+
+```json
+{
+  "enabled": true,
+  "service_port": 3849,
+  "embedding_backend": "ollama",
+  "embedding_model": "qwen3-embedding",
+  "fallback_backend": "sentence-transformers",
+  "fallback_model": "BAAI/bge-m3",
+  "ollama_llm_model": "qwen3:4b",
+  "search_top_k": 5,
+  "search_min_score": 0.65,
+  "search_timeout_ms": 2000,
+  "auto_start_service": true,
+  "auto_index_on_change": true
+}
+```
+
+---
+
+## 八、版本紀錄
 
 | 版本 | 日期 | 變更 |
 |------|------|------|
 | 1.0 | 2026-03-02 | 初版：三層分類 + 資料夾結構 + 健檢腳本規格 |
+| 1.1 | 2026-03-03 | 新增 §七 向量搜尋層（RAG）規格 |
+| 2.0 | 2026-03-03 | **原子記憶 V2**：Hybrid RECALL 實作完成（keyword + vector + LLM） |

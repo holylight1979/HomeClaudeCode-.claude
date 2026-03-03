@@ -9,7 +9,7 @@
 | preferences | memory/preferences.md | 偏好, 風格, 習慣, style, preference, 語言, 回應 |
 | decisions | memory/decisions.md | 全域決策, 工具, 工作流, workflow, 設定, config, 記住, MCP, 瀏覽器, guardian, hooks |
 | excel-tools | memory/excel-tools.md | Excel, xls, xlsx, 讀取, 試算表, spreadsheet, openpyxl, xlrd |
-| rag-vector-plan | memory/rag-vector-plan.md | RAG, vector, 向量, embedding, 語意, semantic, ChromaDB, Ollama, 本地LLM, sentence-transformers |
+| rag-vector-plan | memory/rag-vector-plan.md | RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama, 本地LLM, sentence-transformers, qwen3-embedding, bge-m3 |
 
 ---
 
@@ -23,4 +23,7 @@
 - [固] MCP 可用: playwright, openclaw-notify, workflow-guardian, computer-use（Node 22 LTS）
 - [固] MCP 自寫 server 必須用 JSONL 格式 + protocolVersion 2025-11-25
 - [固] Workflow Guardian: hooks 驅動工作流監督 + Dashboard @ localhost:3848
+- [固] **原子記憶 V2**：Hybrid RECALL（keyword + vector semantic search + local LLM）@ localhost:3849
+- [固] Vector Service: LanceDB + qwen3-embedding (Ollama) / bge-m3 (fallback) | LLM: qwen3:1.7b
+- [固] GPU: GTX 1050 Ti 4GB — qwen3.5 系列太慢，維持 qwen3 系列
 - [固] Excel 讀取工具: `~/.claude/tools/read-excel.py`（Python3 + openpyxl + xlrd，跨專案可用）

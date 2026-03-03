@@ -1,27 +1,27 @@
 # Hybrid RAG 架構設計
 
 - Scope: global
-- Confidence: [觀]
-- Trigger: RAG, vector, 向量, embedding, 語意, semantic, ChromaDB, LanceDB, Ollama, 本地LLM, local LLM, sentence-transformers
+- Confidence: [固]
+- Trigger: RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama, 本地LLM, local LLM, sentence-transformers, qwen3-embedding, bge-m3
 - Last-used: 2026-03-03
-- Confirmations: 1
+- Confirmations: 2
 
 ## 知識
 
-### 決策
+### 決策（已實作）
 
-- [觀] 採用 Hybrid 架構：keyword trigger（現有）優先 + vector semantic search 補充
-- [觀] 現有 atom trigger 系統保留不動，RAG 作為 RECALL 階段的第二層
-- [觀] 後端雙軌：sentence-transformers（快速 embedding ~150ms）+ Ollama（高品質 + LLM 推理）
-- [觀] 向量 DB 選擇：ChromaDB（DX 好、社群大）或 LanceDB（更輕、Rust 核心）
-- [觀] 使用者決定兩個都裝：Ollama + sentence-transformers
+- [固] 採用 Hybrid 架構：keyword trigger（現有）優先 + vector semantic search 補充
+- [固] 現有 atom trigger 系統保留不動，RAG 作為 RECALL 階段的第二層
+- [固] 後端雙軌：Ollama `qwen3-embedding`（主力，MTEB 多語言 #1）+ sentence-transformers `BAAI/bge-m3`（fallback）
+- [固] 向量 DB：**LanceDB**（ChromaDB 與 Python 3.14 不相容，已棄用）
+- [固] 本地 LLM：`qwen3:1.7b`（qwen3:4b 在 GTX 1050 Ti 上過慢，部分 CPU offload）
+- [固] Index endpoints 非同步：HTTP 立即回應，背景執行建索引
 
 ### 環境資訊
 
-- GPU: NVIDIA GTX 1050 Ti (4GB VRAM, CUDA 可用)
+- GPU: NVIDIA GTX 1050 Ti (4GB VRAM, ~2577 MiB 可用, CUDA 6.1)
 - Python: 3.14.2
-- Ollama: 未安裝（待安裝）
-- Node: 24.12.0（主用）+ 22.14.0（computer-use-mcp 專用）
+- Ollama: 已安裝，qwen3-embedding + qwen3:1.7b 已拉取
 - Hook timeout: UserPromptSubmit = 3 秒（vector search 必須在 ~2s 內完成）
 
 ### 架構設計
@@ -29,7 +29,7 @@
 ```
 UserPromptSubmit (3s timeout)
 ├─ [1] Keyword matching (existing, ~10ms)
-├─ [2] HTTP → Vector Service @ localhost:3849 (~200-500ms)
+├─ [2] HTTP → Vector Service @ localhost:3849 (~200-400ms warm)
 │       GET /search?q=<prompt>&top_k=5
 │       → 返回 ranked atom names + similarity scores
 ├─ [3] Merge: keyword + semantic results (deduplicate)
@@ -37,59 +37,51 @@ UserPromptSubmit (3s timeout)
 └─ Output context
 ```
 
-### Memory Vector Service（新元件）
+### Memory Vector Service（已實作）
 
 - 位置：`~/.claude/tools/memory-vector-service/`
+- 檔案：service.py, indexer.py, searcher.py, reranker.py, config.py
 - 類型：Python HTTP daemon（非 MCP），port 3849
-- 啟動時載入 embedding model（一次載入，後續查詢 ~50-200ms）
-- ChromaDB 持久化存儲：`~/.claude/memory/_vectordb/`
-- API endpoints：GET /search、POST /index、GET /health
+- 啟動時載入 embedding model（一次載入，warm search ~386ms）
+- LanceDB 持久化存儲：`~/.claude/memory/_vectordb/`
+- API: GET /search, /health, /status; POST /index, /index/incremental, /reload, /shutdown, /search/enhanced, /rerank, /extract
 - 自動啟動：由 SessionStart hook 檢查並啟動
+- CLI：`python tools/rag-engine.py {index|search|status|health|start|stop|extract}`
 
-### 效能基準
+### 實測效能
 
-| 後端 | Embedding | Search | 總計 | 狀態 |
-|------|-----------|--------|------|------|
-| sentence-transformers (GPU) | 50-100ms | 10-50ms | ~150ms | 最快 |
-| Ollama nomic-embed-text | 200-300ms | 20-100ms | ~400ms | 品質好 |
-| SQLite FTS5 | N/A | 5-20ms | ~20ms | 無語意 |
+| 指標 | 數值 |
+|------|------|
+| 全量索引（18 atoms → 377 chunks） | ~315s（首次） |
+| Daemon warm search | ~386ms |
+| Enhanced search（LLM query rewrite） | ~7-10s |
+| Hook 內語意搜尋 | < 500ms（2s timeout） |
 
-### 本地 LLM 應用場景（Ollama，未來）
+### 本地 LLM 功能（Phase 3，已實作）
 
-1. **Reranking** — 向量搜尋候選 → LLM 判斷真正相關性
-2. **摘要** — 長 atom 注入前先摘要，省 token
-3. **知識萃取** — 從 session transcript 自動萃取事實寫入 atom
-4. **Session transcript search** — 索引過去對話歷史，語意搜尋
+1. **Query Rewriting** — LLM 改寫查詢擴展同義詞（`/search/enhanced`）
+2. **Re-ranking** — 向量 top-10 → LLM 逐一評分 → 加權重排（`/rerank`）
+3. **知識萃取** — 從文本自動萃取結構化 [固/觀/臨] 事實（`/extract`）
 
-### 為什麼不只用 RAG
+### 技術陷阱（已解決）
 
-- 目前只有 ~5 個 atoms，keyword matching 完美運作
-- RAG 真正有價值的場景：50+ atoms、session transcript 搜尋、跨專案經驗遷移
-- 3 秒 hook timeout 是硬限制，embedding service 必須是常駐 daemon
-
-### 安裝需求
-
-```bash
-# Python packages
-pip install sentence-transformers chromadb
-
-# Ollama (Windows installer)
-# https://ollama.com/download/windows
-# 安裝後：
-ollama pull nomic-embed-text    # embedding model (~274MB)
-ollama pull qwen2.5:3b          # LLM for reranking/summary (~2GB)
-```
+- [固] ChromaDB 依賴 pydantic v1，與 Python 3.14 不相容 → 改用 LanceDB
+- [固] qwen3:4b 在 4GB VRAM GTX 1050 Ti 上 ~71% GPU / 29% CPU，推理超慢 → 改用 qwen3:1.7b
+- [固] indexer.py 的 `to_pandas()` 需要 pandas → 改用 LanceDB `to_list()` / `count_rows()`
+- [固] enhanced search min_score 0.65 太高（改寫查詢分數 ~0.4-0.54）→ 自動降為 min(config, 0.4)
+- [固] pip 在 Git Bash 不直接可用 → 使用 `python -m pip install`
 
 ## 行動
 
-- 新 session 接手時，按 plans/compiled-coalescing-shore.md 的待實作步驟執行
-- 先安裝 Ollama + sentence-transformers + chromadb
-- 建立 memory-vector-service HTTP daemon
-- 修改 workflow-guardian.py RECALL phase 整合 semantic search
-- 測試 latency 必須在 3 秒內（目標 < 500ms）
+- 系統已實作完畢，日常使用時自動運作
+- 修改 atom 後會自動觸發增量索引（PostToolUse hook）
+- 手動全量重建：`python ~/.claude/tools/rag-engine.py index`
+- 手動搜尋：`python ~/.claude/tools/rag-engine.py search "查詢"`
+- 增強搜尋：`python ~/.claude/tools/rag-engine.py search "查詢" --enhanced`
 
 ## 演化日誌
 
 | 日期 | 變更 | 來源 |
 |------|------|------|
 | 2026-03-03 | 研究完成，建立為 [觀] | session 研究分析 |
+| 2026-03-03 | 全系統實作完成，晉升 [固]；ChromaDB→LanceDB、qwen3:4b→1.7b | session 實作測試 |

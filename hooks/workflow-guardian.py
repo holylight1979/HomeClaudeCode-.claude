@@ -15,6 +15,8 @@ import json
 import os
 import sys
 import re
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -258,6 +260,89 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+# ─── Vector Service Helpers ───────────────────────────────────────────────────
+
+
+def _ensure_vector_service(config: Dict[str, Any]) -> None:
+    """Check if Memory Vector Service is running; start if not."""
+    vs_config = config.get("vector_search", {})
+    port = vs_config.get("service_port", 3849)
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=1):
+            return  # Already running
+    except Exception:
+        pass
+    # Try to start
+    service_path = CLAUDE_DIR / "tools" / "memory-vector-service" / "service.py"
+    if not service_path.exists():
+        return
+    try:
+        import subprocess
+        CREATE_NO_WINDOW = 0x08000000
+        log_path = CLAUDE_DIR / "memory" / "_vectordb" / "service.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            [sys.executable, str(service_path)],
+            creationflags=CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=open(str(log_path), "a"),
+        )
+    except Exception:
+        pass  # Non-critical
+
+
+def _semantic_search(prompt: str, config: Dict[str, Any]) -> List[Tuple[str, str, List[str]]]:
+    """Query Memory Vector Service. Returns AtomEntry list on success, [] on any failure.
+
+    Timeout: 2 seconds. Any error → graceful fallback to keyword-only.
+    """
+    vs_config = config.get("vector_search", {})
+    if not vs_config.get("enabled", True):
+        return []
+    port = vs_config.get("service_port", 3849)
+    top_k = vs_config.get("search_top_k", 5)
+    min_score = vs_config.get("search_min_score", 0.65)
+    timeout_s = vs_config.get("search_timeout_ms", 2000) / 1000.0
+
+    try:
+        import urllib.parse
+        params = urllib.parse.urlencode({"q": prompt, "top_k": top_k, "min_score": min_score})
+        url = f"http://127.0.0.1:{port}/search?{params}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            results = json.loads(resp.read())
+        # Convert to AtomEntry format: (name, file_path, [])
+        entries: List[Tuple[str, str, List[str]]] = []
+        seen = set()
+        for r in results:
+            name = r.get("atom_name", "")
+            if name and name not in seen:
+                entries.append((name, r.get("file_path", ""), []))
+                seen.add(name)
+        return entries
+    except Exception:
+        return []  # graceful fallback
+
+
+def _trigger_incremental_index(config: Dict[str, Any]) -> None:
+    """Non-blocking request to re-index changed atoms."""
+    vs_config = config.get("vector_search", {})
+    if not vs_config.get("auto_index_on_change", True):
+        return
+    port = vs_config.get("service_port", 3849)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/index/incremental",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1)
+    except Exception:
+        pass  # Non-critical
+
+
 # ─── Event Handlers ──────────────────────────────────────────────────────────
 
 
@@ -313,6 +398,10 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
             lines.append(f"Project atoms: {', '.join(p_names)}.")
         lines.append("I will track file modifications and remind you to sync before ending.")
 
+    # ── Vector Service auto-start ──────────────────────────────────────
+    if config.get("vector_search", {}).get("auto_start_service", True):
+        _ensure_vector_service(config)
+
     write_state(session_id, state)
 
     output_json({
@@ -353,12 +442,25 @@ def handle_user_prompt_submit(
             name, rel_path, triggers = entry
             all_atoms.append(((name, rel_path, triggers), proj_parent))
 
-    # Match prompt against triggers
+    # Match prompt against triggers (keyword)
     matched_with_dir: List[Tuple[AtomEntry, Path]] = []
     prompt_lower = prompt.lower()
     for (name, rel_path, triggers), base_dir in all_atoms:
         if name not in already_injected and any(kw in prompt_lower for kw in triggers):
             matched_with_dir.append(((name, rel_path, triggers), base_dir))
+
+    # ── Semantic search (supplement) ─────────────────────────────────
+    kw_matched_names = {e[0][0] for e in matched_with_dir}
+    sem_atoms = _semantic_search(prompt, config)
+    for sem_name, sem_path, _ in sem_atoms:
+        if sem_name in kw_matched_names or sem_name in already_injected:
+            continue
+        # Find the base_dir for this atom from all_atoms
+        for (name, rel_path, triggers), base_dir in all_atoms:
+            if name == sem_name:
+                matched_with_dir.append(((name, rel_path, triggers), base_dir))
+                kw_matched_names.add(name)
+                break
 
     # Load atoms within budget
     if matched_with_dir:
@@ -475,6 +577,11 @@ def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         })
         state["sync_pending"] = True
         write_state(session_id, state)
+
+        # Trigger incremental vector index if an atom file was modified
+        normalized = file_path.replace("\\", "/")
+        if "/memory/" in normalized and normalized.endswith(".md"):
+            _trigger_incremental_index(config)
 
     output_nothing()
 

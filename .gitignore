@@ -26,6 +26,12 @@ stats-cache.json
 workflow/state-*.json
 workflow/guardian-crash.log
 
+# ─── Memory Vector Service runtime ────────────────────────
+memory/_vectordb/*.lance
+memory/_vectordb/*.lance/**
+memory/_vectordb/service.pid
+memory/_vectordb/service.log
+
 # ─── Node.js runtimes (portable, not tracked) ────────────
 tools/node22/
 
