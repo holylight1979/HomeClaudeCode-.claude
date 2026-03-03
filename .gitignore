@@ -1,0 +1,25 @@
+# Credentials & secrets
+.credentials.json
+mcp-needs-auth-cache.json
+
+# Cache & generated
+cache/
+debug/
+file-history/
+downloads/
+shell-snapshots/
+telemetry/
+todos/
+backups/
+plans/
+ide/
+plugins/
+stats-cache.json
+
+# Session transcripts (huge, not needed in repo)
+projects/*/*.jsonl
+projects/*/*/
+
+# Keep only memory/ directories inside projects
+!projects/*/memory/
+!projects/*/memory/**

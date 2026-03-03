@@ -1,0 +1,70 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command:*)",
+      "Bash(powershell:*)",
+      "Bash(python -c:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(du:*)",
+      "Bash(dir:*)",
+      "Bash(copy:*)",
+      "Bash(iconv:*)",
+      "Bash(cd:*)",
+      "Bash(where:*)",
+      "Bash(echo:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(gh auth status:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Read(//c/Users/**)",
+      "Read(//c/ProgramData/**)",
+      "Read(//tmp/**)",
+      "mcp__MCPControl__get_screen_size",
+      "Bash(powershell.exe -Command \"Stop-Process -Name ngrok -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process -Filter \"\"Name=''node.exe''\"\" | Where-Object {$_.CommandLine -like ''*bridge-server*''} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; & cmd /c ''openclaw gateway stop'' 2>&1\")",
+      "Bash(powershell.exe -Command \"Stop-Process -Name ngrok -Force -ErrorAction SilentlyContinue\")",
+      "Bash(cmd //c \"openclaw gateway stop\")",
+      "Bash(powershell.exe -Command \"Get-CimInstance Win32_Process -Filter \\\\\"\"Name=''node.exe''\\\\\"\" | ForEach-Object { if \\(\\\\$_.CommandLine -like ''*bridge-server*''\\) { Stop-Process -Id \\\\$_.ProcessId -Force } }\")",
+      "Bash(openclaw --help)",
+      "Read(//e/OpenClawWorkSpace/**)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node E:/OpenClawWorkSpace/.claude/scripts/memory-v2/index.js",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node E:/OpenClawWorkSpace/.claude/scripts/inbox-check.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const http=require('http');const d=JSON.stringify({channelId:'1476967208461664378',message:'Claude Code session ended.'});const r=http.request({hostname:'127.0.0.1',port:3847,path:'/notify/discord',method:'POST',headers:{'Authorization':'Bearer openclaw-bridge-default-token','Content-Type':'application/json','Content-Length':Buffer.byteLength(d)}},()=>{});r.write(d);r.end()\" 2>/dev/null || true",
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "autoUpdatesChannel": "latest"
+}

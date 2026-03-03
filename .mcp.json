@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "computer-control-mcp": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "computer_control_mcp"],
+      "env": {
+        "COMPUTER_CONTROL_MCP_SCREENSHOT_DIR": "C:\\Users\\holyl\\Pictures\\Screenshots"
+      },
+      "disabled": true
+    },
+    "MCPControl": {
+      "type": "stdio",
+      "command": "mcp-control",
+      "args": [],
+      "env": {},
+      "disabled": true
+    },
+    "desktop-automation": {
+      "type": "stdio",
+      "command": "mcp-desktop-automation",
+      "args": [],
+      "env": {},
+      "disabled": true
+    }
+  }
+}
