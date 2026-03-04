@@ -31,6 +31,12 @@ hooks/workflow-guardian.py            → ~/.claude/hooks/workflow-guardian.py
 tools/workflow-guardian-mcp/          → ~/.claude/tools/workflow-guardian-mcp/
 tools/memory-vector-service/          → ~/.claude/tools/memory-vector-service/
 tools/rag-engine.py                   → ~/.claude/tools/rag-engine.py
+tools/memory-audit.py                 → ~/.claude/tools/memory-audit.py
+tools/memory-write-gate.py            → ~/.claude/tools/memory-write-gate.py
+tools/memory-conflict-detector.py     → ~/.claude/tools/memory-conflict-detector.py
+tools/test-memory-v21.py              → ~/.claude/tools/test-memory-v21.py
+tools/eval-ranked-search.py           → ~/.claude/tools/eval-ranked-search.py
+tools/read-excel.py                   → ~/.claude/tools/read-excel.py
 workflow/config.json                  → ~/.claude/workflow/config.json
 commands/init-project.md              → ~/.claude/commands/init-project.md
 memory/SPEC_Atomic_Memory_System.md   → ~/.claude/memory/SPEC_Atomic_Memory_System.md
@@ -146,6 +152,20 @@ ollama pull qwen3:1.7b            # 本地 LLM for Phase 3 (~1.5GB)
 }
 ```
 
+### Step 7.5: 確認 config.json 新增區段（v2.1/v2.2）
+
+`~/.claude/workflow/config.json` 在 v2.1/v2.2 新增了 5 個區段。確認目標機器的 config.json 包含：
+
+| 區段 | 用途 | 關鍵預設值 |
+|------|------|-----------|
+| `write_gate` | 寫入品質閘門 + 去重 | `auto_threshold: 0.5, dedup_score: 0.80` |
+| `episodic` | Session 摘要自動生成 | `auto_generate: true, min_files: 1, min_duration: 120s` |
+| `session_awareness` | Topic tracking + keyword signals | `enabled: true, max_keyword_signals: 20` |
+| `cleanup` | Session state 自動清理（三層 TTL） | `ended: 1min, orphan_done: 30min, orphan_working: 24h` |
+| `decay` | 分類別衰減策略 | `[固]=90d, [觀]=60d, [臨]=30d` |
+
+若從 v2.0 升級，需手動將這 5 個區段合併到現有 config.json。完整範例見 README.md Configuration 區段。
+
 ### Step 8: 初始化記憶索引
 
 若目標機器的 `~/.claude/memory/MEMORY.md` 尚未存在，建立最小版本：
@@ -167,7 +187,7 @@ ollama pull qwen3:1.7b            # 本地 LLM for Phase 3 (~1.5GB)
 
 - 使用者: {{USERNAME}} | 回應語言: 繁體中文
 - [固] Workflow Guardian: hooks 驅動工作流監督 + Dashboard @ localhost:3848
-- [固] 原子記憶 V2：Hybrid RECALL（keyword + vector semantic search）@ localhost:3849
+- [固] 原子記憶 V2.2：Hybrid RECALL + Ranked Search + Session Awareness @ localhost:3849
 ```
 
 ### Step 9: 建立向量索引
@@ -182,9 +202,15 @@ python ~/.claude/tools/rag-engine.py start
 # 建立全量索引（首次需要幾分鐘，取決於 atom 數量和 GPU 速度）
 python ~/.claude/tools/rag-engine.py index
 
-# 驗證
+# 驗證基本功能
 python ~/.claude/tools/rag-engine.py status
 python ~/.claude/tools/rag-engine.py search "test query"
+
+# 驗證 ranked search（v2.1）
+python ~/.claude/tools/rag-engine.py search "測試" --rerank
+
+# 驗證 E2E 測試（v2.1，需有足夠 atoms）
+python ~/.claude/tools/test-memory-v21.py
 ```
 
 ### Step 10: 驗證
@@ -192,11 +218,13 @@ python ~/.claude/tools/rag-engine.py search "test query"
 重啟 Claude Code（VS Code: `Ctrl+Shift+P` → `Reload Window`），然後：
 
 1. 執行 `/mcp` — 確認 `workflow-guardian` 狀態為 **connected**
-2. 開啟 `http://127.0.0.1:3848` — 應看到 Dashboard
+2. 開啟 `http://127.0.0.1:3848` — 應看到 Dashboard（5 tabs）
 3. 編輯任意檔案 → Dashboard 應出現新 session 卡片
 4. 嘗試結束對話 → Guardian 應阻止並提醒同步
 5. 確認 Vector Service 運行：`python ~/.claude/tools/rag-engine.py health`
 6. 確認語意搜尋：`python ~/.claude/tools/rag-engine.py search "測試"`
+7. 確認 Write Gate：`python ~/.claude/tools/memory-write-gate.py --content "test knowledge" --classification "[臨]"`
+8. 確認 E2E 測試：`python ~/.claude/tools/test-memory-v21.py`（9 tests should pass）
 
 ---
 
@@ -222,6 +250,7 @@ V2 向量搜尋設計為 graceful degradation：
 | sentence-transformers 也沒裝 | 純 keyword 模式（V1 行為） |
 | Vector Service daemon 未啟動 | 純 keyword 模式（V1 行為） |
 | GPU 不可用 | CPU fallback（慢 3-5x 但可用） |
+| Write Gate service 不可用 | 略過品質檢查，直接寫入（v2.0 行為） |
 
 **任何環節故障都不會影響 Claude Code 正常運作**，只是語意搜尋功能不可用。
 
@@ -231,9 +260,9 @@ V2 向量搜尋設計為 graceful degradation：
 
 本擴充包含兩個核心系統，透過 7 個階段（BOOT → RECALL → TRACK → REMIND → COMPACT → GATE → SYNC）管理 session 生命週期：
 
-1. **原子記憶 V2**：跨 session 知識管理，兩層（全域/專案）、三級分類（[固]/[觀]/[臨]），Hybrid RECALL（keyword + vector semantic search），本地 LLM 增強（查詢改寫、re-ranking、知識萃取）
-2. **Workflow Guardian**：hooks 事件驅動的工作流監督，自動追蹤修改、阻止未同步結束、提供 Dashboard 監控
+1. **原子記憶 V2.2**：跨 session 知識管理，兩層（全域/專案）、三級分類（[固]/[觀]/[臨]），Hybrid RECALL + Ranked Search + Session Awareness。Write Gate 品質控制、Conflict Detection 衝突偵測、Proactive Classification 自動分類建議、[臨]→[觀] 自動晉升（Confirmations ≥ 2）、Episodic atoms 自動生成（TTL=24d，向量搜尋發現）
+2. **Workflow Guardian**：hooks 事件驅動的工作流監督，自動追蹤修改、阻止未同步結束、5-tab Dashboard 監控、Session state 三層自動清理
 
 MCP 傳輸格式：JSONL（`{...}\n`），protocolVersion `2025-11-25`。
 
-詳見 `README.md`（運作流程圖）、`_AIDocs/Architecture.md` 和 `memory/SPEC_Atomic_Memory_System.md`。
+詳見 `README.md`（運作流程圖 + 已知限制）、`_AIDocs/Architecture.md` 和 `memory/SPEC_Atomic_Memory_System.md`。
