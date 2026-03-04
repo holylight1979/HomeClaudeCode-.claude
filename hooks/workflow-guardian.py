@@ -603,6 +603,9 @@ def handle_user_prompt_submit(
             today_str = datetime.now().strftime("%Y-%m-%d")
             last_used_re = re.compile(r"^(- Last-used:\s*)\d{4}-\d{2}-\d{2}", re.MULTILINE)
             confirmations_re = re.compile(r"^(- Confirmations:\s*)(\d+)", re.MULTILINE)
+            confidence_re = re.compile(r"^- Confidence:\s*(\[(?:臨|觀|固)\])", re.MULTILINE)
+            PROMOTION_THRESHOLDS = {"[臨]": 2, "[觀]": 4}
+            PROMOTION_TARGETS = {"[臨]": "[觀]", "[觀]": "[固]"}
             for inj_name in newly_injected:
                 for (name, rel_path, triggers), base_dir in matched_with_dir:
                     if name != inj_name:
@@ -613,6 +616,7 @@ def handle_user_prompt_submit(
                     try:
                         text = apath.read_text(encoding="utf-8-sig")
                         changed = False
+                        new_count = None
                         # Update Last-used
                         if last_used_re.search(text):
                             new_text = last_used_re.sub(rf"\g<1>{today_str}", text)
@@ -632,9 +636,23 @@ def handle_user_prompt_submit(
                                 r"\1\n- Confirmations: 1",
                                 text, count=1, flags=re.MULTILINE,
                             )
+                            new_count = 1
                             changed = True
                         if changed:
                             apath.write_text(text, encoding="utf-8")
+                        # Promotion hint (v2.1.1) — proactive threshold alert
+                        if new_count is not None:
+                            conf_m = confidence_re.search(text)
+                            if conf_m:
+                                cur = conf_m.group(1)
+                                threshold = PROMOTION_THRESHOLDS.get(cur)
+                                if threshold and new_count >= threshold:
+                                    target = PROMOTION_TARGETS[cur]
+                                    lines.append(
+                                        f"⚡ [{inj_name}] Confirmations={new_count}, "
+                                        f"目前{cur}, 已達{target}門檻，"
+                                        f"觸及相關行為時請主動確認是否晉升"
+                                    )
                     except (OSError, UnicodeDecodeError):
                         pass
                     break
