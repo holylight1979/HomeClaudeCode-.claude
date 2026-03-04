@@ -3,7 +3,7 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama, 本地LLM, local LLM, sentence-transformers, qwen3-embedding, bge-m3
-- Last-used: 2026-03-03
+- Last-used: 2026-03-04
 - Confirmations: 2
 
 ## 知識
@@ -71,6 +71,17 @@ UserPromptSubmit (3s timeout)
 - [固] enhanced search min_score 0.65 太高（改寫查詢分數 ~0.4-0.54）→ 自動降為 min(config, 0.4)
 - [固] pip 在 Git Bash 不直接可用 → 使用 `python -m pip install`
 
+### v2.1 改進方向（已研究，待實作）
+
+- [觀] 7 大缺陷已盤點：碎片化/TTL/衝突/噪音/intent/分層/隱私
+- [觀] 新 schema 欄位：Type, TTL, Expires-at, Related, Supersedes, Privacy, Tags, Quality
+- [觀] Write Gate：quality score + dedup 檢查（走 session-end 非即時路徑）
+- [觀] Conflict Detection：LLM 語意比對 AGREE/CONTRADICT/EXTEND/UNRELATED
+- [觀] Retrieval Ranking：0.45 semantic + 0.15 recency + 0.20 intent + 0.10 confidence + 0.10 confirmations
+- [觀] Decay --enforce：[臨]>30d 自動淘汰，[觀]>60d 提醒
+- [觀] Confirmations 自動遞增（guardian hook 更新 Last-used 時同步 ++）
+- 完整計畫：`_AIDocs/AtomicMemory-v2.1-Plan.md`
+
 ## 行動
 
 - 系統已實作完畢，日常使用時自動運作
@@ -78,10 +89,12 @@ UserPromptSubmit (3s timeout)
 - 手動全量重建：`python ~/.claude/tools/rag-engine.py index`
 - 手動搜尋：`python ~/.claude/tools/rag-engine.py search "查詢"`
 - 增強搜尋：`python ~/.claude/tools/rag-engine.py search "查詢" --enhanced`
+- **v2.1 實作**：讀 `_AIDocs/AtomicMemory-v2.1-Plan.md` 按 Sprint 1→2→3 順序
 
 ## 演化日誌
 
 | 日期 | 變更 | 來源 |
 |------|------|------|
+| 2026-03-04 | v2.1 缺陷研究完成：7 缺陷 + 6 系統比較 + schema + 路線圖，標為 [觀] 待實作 | session 研究 |
 | 2026-03-03 | 研究完成，建立為 [觀] | session 研究分析 |
 | 2026-03-03 | 全系統實作完成，晉升 [固]；ChromaDB→LanceDB、qwen3:4b→1.7b | session 實作測試 |

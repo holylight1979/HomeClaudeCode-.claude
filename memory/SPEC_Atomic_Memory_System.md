@@ -1,8 +1,9 @@
-# 原子記憶系統規格 v2.0
+# 原子記憶系統規格 v2.1
 
-> Atomic Memory System V2 Specification
+> Atomic Memory System V2.1 Specification
 > 適用於 Claude Code 跨 session 知識管理。
 > V2：Hybrid RECALL — Keyword Trigger + Vector Semantic Search + Local LLM
+> V2.1：Write Gate + Decay Enforce + Schema 擴展 + Confirmations 自動遞增
 
 ---
 
@@ -55,17 +56,18 @@
 
 ### 2.4 降級與遙遠記憶
 
-記憶永不刪除，而是移入**遙遠記憶區**（`_distant/`），按 `年_月` 歸檔。
+預設移入**遙遠記憶區**（`_distant/`），按 `年_月` 歸檔。`--purge` 永久刪除。
 
 #### 觸發條件
 
-| 條件 | 動作 |
-|------|------|
-| `[臨]` Last-used > 30 天 | 移至 `_distant/{年}_{月}/` |
-| `[觀]` Last-used > 60 天 | 下次觸及時確認；無回應則移入遙遠記憶 |
-| `[固]` 被使用者推翻 | 降為 `[觀]`，再次推翻降為 `[臨]` |
-| `[固]` Last-used > 90 天 | 健檢報告提醒，不自動移動 |
-| 使用者明確拒絕 | 移入遙遠記憶，演化日誌記錄原因 |
+| 條件 | 動作 | --enforce 行為 (v2.1) |
+|------|------|----------------------|
+| `[臨]` Last-used > 30 天 | 建議移至 `_distant/` | **自動移入** + 寫入演化日誌 |
+| `[觀]` Last-used > 60 天 | 確認；無回應則移入 | 標記 `pending-review`，不自動移入 |
+| `[固]` 被使用者推翻 | 降為 `[觀]` | 同左 |
+| `[固]` Last-used > 90 天 | 報告提醒 | 同左（永不自動淘汰） |
+| 使用者明確拒絕 | 移入遙遠記憶 | 同左 |
+| TTL 設定且已過期 (v2.1) | 依 confidence 處理 | [臨] 自動移入；[觀][固] 標記 |
 
 #### 遙遠記憶區結構
 
@@ -138,9 +140,18 @@ memory/
 
 - Scope: [global|project]
 - Confidence: [固|觀|臨]
+- Type: semantic                 ← v2.1（semantic/episodic/procedural，預設 semantic）
 - Trigger: kw1, kw2, kw3
 - Last-used: YYYY-MM-DD
+- Created: YYYY-MM-DD            ← v2.1（首次建立日期）
 - Confirmations: N
+- TTL: 30d                       ← v2.1（可選，null = 由 confidence 決定）
+- Expires-at: YYYY-MM-DD         ← v2.1（可選，自動計算）
+- Privacy: public                ← v2.1（public/internal/sensitive，預設 public）
+- Tags: pitfall, architecture    ← v2.1（可選，分類標籤）
+- Related: other-atom-name       ← v2.1（可選，關聯 atom）
+- Supersedes: old-atom-name      ← v2.1（可選，取代的舊 atom）
+- Quality: 0.85                  ← v2.1（Write Gate 品質評分，0-1）
 
 ## 知識
 
@@ -158,7 +169,21 @@ memory/
 ```
 
 **必要欄位**：Scope, Confidence, Trigger, Last-used
-**可選欄位**：Confirmations, Privacy, Source
+**v2.1 可選欄位**（不存在時使用預設值，既有 atom 零修改即可運作）：
+
+| 欄位 | 預設值 | 說明 |
+|------|--------|------|
+| Type | semantic | semantic/episodic/procedural |
+| Created | （空） | 首次建立日期 |
+| Confirmations | 0 | session 引用且未推翻時自動 +1 |
+| TTL | null | 自訂存活期，null = 由 confidence 閾值決定 |
+| Expires-at | null | 自動計算或手動設定 |
+| Privacy | public | public/internal/sensitive |
+| Tags | （空） | 分類標籤 |
+| Related | （空） | 關聯 atom 名稱 |
+| Supersedes | （空） | 取代的舊 atom 名稱 |
+| Quality | （空） | Write Gate 品質評分（0-1） |
+
 **必要區段**：知識, 行動
 **可選區段**：演化日誌
 
@@ -290,6 +315,10 @@ python memory-audit.py [OPTIONS]
   --project PATH            指定專案 memory 目錄
   --json                    JSON 格式輸出
   --verbose                 含逐 atom 詳細資訊
+
+自動淘汰（v2.1）：
+  --enforce                 自動執行淘汰：[臨]>30d 移入 _distant/，[觀]>60d 標記 pending-review
+  --dry-run                 搭配 --enforce，只報告不執行
 
 遙遠記憶操作：
   --search-distant <kw>     搜尋遙遠記憶區
