@@ -6,6 +6,7 @@
 
 | 日期 | 變更 | 影響檔案 |
 |------|------|---------|
+| 2026-03-05 | V2.3 全面升級 OpenClaw Phase 1+2: MEMORY.md 重寫(155行→33行,3欄格式)、建立 root CLAUDE.md、4個新 atom(architecture/setup-guide/taxonomy/self-iteration)、更新 config-intelligence | MEMORY.md, CLAUDE.md, 4 new atoms, config-intelligence |
 | 2026-03-05 | 建立 README.md（設計哲學、Token 對比、流程圖 x2、大型專案使用法）+ Install-forAI.md 安裝指南 | README.md, Install-forAI.md, memory/decisions.md |
 | 2026-03-05 | 原子記憶 V2.3 S5: OpenClaw atoms 整合 — indexer.py 支援多來源目錄 + 遞迴掃描 + skip_files，config.json 加 additional_atom_dirs，memory-v2-cc.md 標記 deprecated | indexer.py, config.py, config.json, memory-v2-cc.md |
 | 2026-03-05 | 原子記憶 V2.3 S6: E2E 驗證 + bug fix — memory-audit.py 加 Any import、test-memory-v21.py 修正 episodic_generation 斷言（v2.2 不寫 MEMORY.md）、Architecture.md 更新為 V2.3 | memory-audit.py, test-memory-v21.py, Architecture.md |
