@@ -40,6 +40,11 @@
     "orphan_done_ttl_ms": 1800000,
     "orphan_working_ttl_ms": 86400000
   },
+  "session_awareness": {
+    "enabled": true,
+    "max_keyword_signals": 20,
+    "max_triggers": 12
+  },
   "decay": {
     "enforce_on_audit": false,
     "staleness_thresholds": {"[固]": 90, "[觀]": 60, "[臨]": 30},

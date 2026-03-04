@@ -7,9 +7,9 @@
 | Atom | Path | Trigger |
 |------|------|---------|
 | preferences | memory/preferences.md | 偏好, 風格, 習慣, style, preference, 語言, 回應 |
-| decisions | memory/decisions.md | 全域決策, 工具, 工作流, workflow, 設定, config, 記住, MCP, 瀏覽器, guardian, hooks |
+| decisions | memory/decisions.md | 全域決策, 工作流, workflow, 設定, config, 記住, MCP |
 | excel-tools | memory/excel-tools.md | Excel, xls, xlsx, 讀取, 試算表, spreadsheet, openpyxl, xlrd |
-| rag-vector-plan | memory/rag-vector-plan.md | RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama, 本地LLM, sentence-transformers, qwen3-embedding, bge-m3 |
+| rag-vector-plan | memory/rag-vector-plan.md | RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama |
 
 ---
 

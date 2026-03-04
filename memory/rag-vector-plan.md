@@ -2,9 +2,9 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama, 本地LLM, local LLM, sentence-transformers, qwen3-embedding, bge-m3
+- Trigger: RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama
 - Last-used: 2026-03-04
-- Confirmations: 8
+- Confirmations: 9
 
 ## 知識
 

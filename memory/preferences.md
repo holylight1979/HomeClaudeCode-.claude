@@ -2,7 +2,7 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: 偏好, 風格, 習慣, style, preference, 語言, 回應, prompt, 新session, 下一步
+- Trigger: 偏好, 風格, 習慣, style, preference, 語言, 回應
 - Last-used: 2026-03-04
 - Confirmations: 2
 

@@ -98,7 +98,7 @@ def write_state(session_id: str, state: Dict[str, Any]) -> None:
 def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
     """Create a fresh state object."""
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "session": {
             "id": session_id,
             "started_at": _now_iso(),
@@ -111,6 +111,14 @@ def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
         "sync_pending": False,
         "stop_blocked_count": 0,
         "remind_count": 0,
+        "topic_tracker": {
+            "intent_distribution": {},
+            "prompt_count": 0,
+            "first_prompt_summary": "",
+            "keyword_signals": [],
+            "related_episodic": [],
+        },
+        "session_context_injected": False,
         "last_updated": _now_iso(),
     }
 
@@ -285,6 +293,59 @@ def classify_intent(prompt: str) -> str:
         scores[intent] = sum(1 for kw in keywords if kw in prompt_lower)
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "general"
+
+
+# ─── Topic Tracker (v2.2) ────────────────────────────────────────────────────
+
+_TOPIC_STOP_WORDS = frozenset({
+    "this", "that", "with", "from", "have", "been", "will", "what", "when",
+    "which", "where", "about", "into", "also", "should", "could", "would",
+    "these", "those", "them", "your", "make", "just", "only", "some", "very",
+    "here", "there", "then", "than", "more", "most", "like", "each", "want",
+    "need", "keep", "does", "done", "doing", "help", "sure", "good", "well",
+    "okay", "know", "think", "look", "take", "give", "come", "back", "over",
+    "after", "before", "other", "file", "line", "code", "true", "false",
+})
+
+
+def _update_topic_tracker(
+    state: Dict[str, Any], prompt: str, intent: str, newly_injected: List[str]
+) -> None:
+    """Accumulate topic signals in state. Pure CPU, < 1ms, zero network."""
+    tracker = state.setdefault("topic_tracker", {
+        "intent_distribution": {},
+        "prompt_count": 0,
+        "first_prompt_summary": "",
+        "keyword_signals": [],
+        "related_episodic": [],
+    })
+
+    # 1. Intent distribution
+    dist = tracker["intent_distribution"]
+    dist[intent] = dist.get(intent, 0) + 1
+    tracker["prompt_count"] = tracker.get("prompt_count", 0) + 1
+
+    # 2. First prompt summary (capture once)
+    if not tracker.get("first_prompt_summary"):
+        tracker["first_prompt_summary"] = prompt[:200]
+
+    # 3. Keyword signal extraction
+    existing_kw = set(tracker.get("keyword_signals", []))
+    words = re.findall(r"[a-zA-Z\u4e00-\u9fff]{4,}", prompt)
+    for w in words:
+        wl = w.lower()
+        if wl not in _TOPIC_STOP_WORDS and wl not in existing_kw:
+            existing_kw.add(wl)
+    sa_config = state.get("_sa_config", {})
+    max_kw = sa_config.get("max_keyword_signals", 20)
+    tracker["keyword_signals"] = sorted(existing_kw)[:max_kw]
+
+    # 4. Track related episodic atoms
+    related = tracker.get("related_episodic", [])
+    for name in newly_injected:
+        if name.startswith("episodic-") and name not in related:
+            related.append(name)
+    tracker["related_episodic"] = related
 
 
 # ─── Vector Service Helpers ───────────────────────────────────────────────────
@@ -537,9 +598,9 @@ def handle_user_prompt_submit(
         ]
 
     # Load atoms within budget
+    newly_injected: List[str] = []
     if matched_with_dir:
         atom_lines: List[str] = []
-        newly_injected: List[str] = []
         used_tokens = 0
 
         for (name, rel_path, triggers), base_dir in matched_with_dir:
@@ -656,6 +717,9 @@ def handle_user_prompt_submit(
                     except (OSError, UnicodeDecodeError):
                         pass
                     break
+
+    # ─── Topic tracking (v2.2) ─────────────────────────────────────
+    _update_topic_tracker(state, prompt, intent, newly_injected)
 
     # ─── Phase 2: Sync reminders (existing logic) ────────────────────
     mod_count = len(state.get("modified_files", []))
@@ -885,12 +949,23 @@ def _build_episodic_summary(state: Dict[str, Any]) -> Dict[str, Any]:
 
     atoms_referenced = list(state.get("injected_atoms", []))
 
+    # Topic tracker enrichment (v2.2)
+    tracker = state.get("topic_tracker", {})
+    intent_dist = tracker.get("intent_distribution", {})
+    dominant_intent = max(intent_dist, key=intent_dist.get) if intent_dist else "general"
+
     return {
         "work_areas": work_areas,
         "knowledge_items": knowledge_items,
         "atoms_referenced": atoms_referenced,
         "files_modified": len(modified),
         "primary_area": primary_area,
+        "dominant_intent": dominant_intent,
+        "intent_distribution": intent_dist,
+        "prompt_count": tracker.get("prompt_count", 0),
+        "session_description": tracker.get("first_prompt_summary", ""),
+        "keyword_topics": tracker.get("keyword_signals", []),
+        "related_episodic": tracker.get("related_episodic", []),
     }
 
 
@@ -932,7 +1007,11 @@ def _generate_triggers(state: Dict[str, Any], work_areas: list) -> list:
     for atom_name in state.get("injected_atoms", []):
         triggers.add(atom_name.lower())
 
-    return sorted(triggers)[:8]
+    # Keyword topics from topic tracker (v2.2)
+    for kw in state.get("topic_tracker", {}).get("keyword_signals", [])[:5]:
+        triggers.add(kw.lower())
+
+    return sorted(triggers)[:12]
 
 
 def _update_memory_index(memory_dir: Path, atom_name: str, triggers: list) -> None:
@@ -1006,6 +1085,29 @@ def _generate_episodic_atom(
     for ki in summary["knowledge_items"]:
         knowledge_lines.append(f"- [{ki['classification'].strip('[]')}] {ki['content']}")
 
+    # Build 摘要 section (v2.2)
+    desc = summary.get("session_description", "")
+    dom_intent = summary.get("dominant_intent", "general")
+    prompt_count = summary.get("prompt_count", 0)
+    summary_line = f"{dom_intent.capitalize()}-focused session ({prompt_count} prompts)."
+    if desc:
+        summary_line += f" {desc}"
+
+    # Build 關聯 section (v2.2)
+    relation_lines = []
+    intent_dist = summary.get("intent_distribution", {})
+    if intent_dist:
+        dist_str = ", ".join(f"{k} ({v})" for k, v in
+                             sorted(intent_dist.items(), key=lambda x: -x[1]))
+        relation_lines.append(f"- 意圖分布: {dist_str}")
+    related_ep = summary.get("related_episodic", [])
+    if related_ep:
+        relation_lines.append(f"- Related sessions: {', '.join(related_ep)}")
+    if summary["atoms_referenced"]:
+        relation_lines.append(
+            f"- Referenced atoms: {', '.join(summary['atoms_referenced'])}"
+        )
+
     content = (
         f"# Session: {today} {summary['primary_area']}\n"
         f"\n"
@@ -1019,12 +1121,17 @@ def _generate_episodic_atom(
         f"- TTL: 24d\n"
         f"- Expires-at: {expires}\n"
         f"\n"
+        f"## 摘要\n"
+        f"\n"
+        f"{summary_line}\n"
+        f"\n"
         f"## 知識\n"
         f"\n"
         + "\n".join(knowledge_lines)
         + f"\n"
         f"\n"
-        f"## 行動\n"
+        + (f"## 關聯\n\n" + "\n".join(relation_lines) + "\n\n" if relation_lines else "")
+        + f"## 行動\n"
         f"\n"
         f"- session 自動摘要，TTL 24d 後自動淘汰\n"
         f"- 若需長期保留特定知識，應遷移至專屬 atom\n"
@@ -1033,7 +1140,7 @@ def _generate_episodic_atom(
         f"\n"
         f"| 日期 | 變更 | 來源 |\n"
         f"|------|------|------|\n"
-        f"| {today} | 自動建立 episodic atom | session:{session_id[:8]} |\n"
+        f"| {today} | 自動建立 episodic atom (v2.2) | session:{session_id[:8]} |\n"
     )
 
     atom_path.write_text(content, encoding="utf-8")
