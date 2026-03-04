@@ -31,6 +31,8 @@ from typing import Dict, List, Optional, Set, Tuple
 # ─── Constants ───────────────────────────────────────────────────────────────
 
 STALENESS_THRESHOLDS: Dict[str, int] = {"[固]": 90, "[觀]": 60, "[臨]": 30}
+# v2.1 Sprint 3: Type-based decay multiplier (procedural ages slower, episodic faster)
+TYPE_DECAY_MULTIPLIER: Dict[str, float] = {"semantic": 1.0, "episodic": 0.8, "procedural": 1.5}
 PROMOTION_THRESHOLDS: Dict[str, int] = {"[臨]": 2, "[觀]": 4}
 INDEX_MAX_LINES = 30
 ATOM_MAX_LINES = 200
@@ -121,6 +123,7 @@ class HealthReport:
     demotions: List[Suggestion] = field(default_factory=list)
     duplicates: List[DuplicatePair] = field(default_factory=list)
     distant_count: int = 0
+    audit_stats: Dict[str, Any] = field(default_factory=dict)
 
 
 # ─── Parsing ─────────────────────────────────────────────────────────────────
@@ -340,23 +343,26 @@ def validate_format(atom: AtomMetadata) -> List[Issue]:
 
 
 def check_staleness(atom: AtomMetadata, today: date) -> Optional[Suggestion]:
-    """Check if atom is stale based on Last-used date."""
+    """Check if atom is stale based on Last-used date and atom type."""
     if not atom.last_used or not atom.confidence:
         return None
 
-    threshold = STALENESS_THRESHOLDS.get(atom.confidence)
-    if threshold is None:
+    base_threshold = STALENESS_THRESHOLDS.get(atom.confidence)
+    if base_threshold is None:
         return None
+    type_mult = TYPE_DECAY_MULTIPLIER.get(atom.atom_type, 1.0)
+    threshold = int(base_threshold * type_mult)
 
     days = (today - atom.last_used).days
     if days <= threshold:
         return None
 
     rel = _rel_path(atom.file_path)
+    type_note = f", type={atom.atom_type}" if atom.atom_type != "semantic" else ""
     if atom.confidence == "[臨]":
-        return Suggestion(rel, atom.confidence, "遙遠記憶", f"Last-used {days} 天前（閾值 {threshold}天）")
+        return Suggestion(rel, atom.confidence, "遙遠記憶", f"Last-used {days} 天前（閾值 {threshold}天{type_note}）")
     elif atom.confidence == "[觀]":
-        return Suggestion(rel, atom.confidence, "確認或遙遠記憶", f"Last-used {days} 天前（閾值 {threshold}天）")
+        return Suggestion(rel, atom.confidence, "確認或遙遠記憶", f"Last-used {days} 天前（閾值 {threshold}天{type_note}）")
     else:  # [固]
         return Suggestion(rel, atom.confidence, "建議人工檢視", f"Last-used {days} 天前（閾值 {threshold}天）")
 
@@ -596,6 +602,72 @@ def _append_evolution_entry(atom_path: Path, change: str, source: str = "memory-
         atom_path.write_text(text, encoding="utf-8")
 
 
+def compact_evolution_logs(
+    atom_path: Path, max_entries: int = 10, dry_run: bool = False
+) -> Optional[str]:
+    """Compact evolution log: merge oldest entries into a summary if > max_entries (v2.1 Sprint 3)."""
+    try:
+        text = atom_path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    if "## 演化日誌" not in text:
+        return None
+
+    lines = text.splitlines()
+    # Find data rows in evolution log table
+    in_log = False
+    log_end = len(lines)
+    entries: List[Tuple[int, str]] = []  # (line_index, date_str)
+
+    for i, line in enumerate(lines):
+        if "演化日誌" in line:
+            in_log = True
+            continue
+        if in_log:
+            if line.strip().startswith("##"):
+                log_end = i
+                break
+            stripped = line.strip()
+            if TABLE_ROW_PATTERN.match(stripped):
+                cells = [c.strip() for c in stripped.split("|") if c.strip()]
+                if len(cells) >= 2 and DATE_PATTERN.match(cells[0]):
+                    entries.append((i, cells[0]))
+                elif len(cells) >= 2 and cells[0].startswith("[合併]"):
+                    entries.append((i, cells[0]))  # already-merged line
+
+    if len(entries) <= max_entries:
+        return None
+
+    # Merge oldest entries, keep newest (max_entries - 1)
+    merge_count = len(entries) - (max_entries - 1)
+    to_merge = entries[:merge_count]
+
+    # Extract date range from merge targets
+    dates = [d for _, d in to_merge if DATE_PATTERN.match(d)]
+    earliest = dates[0] if dates else to_merge[0][1]
+    latest = dates[-1] if dates else to_merge[-1][1]
+    summary_line = f"| [合併] | {merge_count} 筆歷史記錄 ({earliest}~{latest}) | auto-compact |"
+
+    rel = _rel_path(atom_path)
+    if dry_run:
+        return f"[DRY-RUN] Would compact {rel}: merge {merge_count} entries ({earliest}~{latest})"
+
+    merged_indices = {idx for idx, _ in to_merge}
+    new_lines = []
+    summary_inserted = False
+    for i, line in enumerate(lines):
+        if i in merged_indices:
+            if not summary_inserted:
+                new_lines.append(summary_line)
+                summary_inserted = True
+        else:
+            new_lines.append(line)
+
+    atom_path.write_text("\n".join(new_lines), encoding="utf-8")
+    return f"COMPACTED: {rel} — merged {merge_count} entries ({earliest}~{latest})"
+
+
 def delete_atom(
     atom_name: str, layer: str = "global", purge: bool = False, dry_run: bool = False
 ) -> Tuple[bool, str]:
@@ -750,22 +822,13 @@ def delete_atom(
             actions.append("  Incremental re-index: service not available (skipped)")
 
     # 7. Audit log
-    audit_entry = {
-        "ts": datetime.now().isoformat(timespec="seconds"),
-        "action": "purge" if purge else "delete",
-        "atom": atom_name,
-        "layer": layer,
-        "purge": purge,
-    }
     if not dry_run:
-        audit_log = CLAUDE_DIR / "memory" / "_vectordb" / "audit.log"
-        audit_log.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(audit_log, "a", encoding="utf-8") as f:
-                f.write(json.dumps(audit_entry, ensure_ascii=False) + "\n")
-            actions.append("  Audit log entry written")
-        except OSError:
-            pass
+        _write_audit_entry({
+            "action": "purge" if purge else "delete",
+            "atom": atom_name,
+            "layer": layer,
+        })
+        actions.append("  Audit log entry written")
 
     return True, "\n".join(actions)
 
@@ -789,8 +852,12 @@ def enforce_decay(args: argparse.Namespace) -> None:
                 continue
 
             days = (today - atom.last_used).days
-            threshold = STALENESS_THRESHOLDS.get(atom.confidence)
-            if threshold is None or days <= threshold:
+            base_threshold = STALENESS_THRESHOLDS.get(atom.confidence)
+            if base_threshold is None:
+                continue
+            type_mult = TYPE_DECAY_MULTIPLIER.get(atom.atom_type, 1.0)
+            threshold = int(base_threshold * type_mult)
+            if days <= threshold:
                 continue
 
             rel = _rel_path(atom.file_path)
@@ -800,8 +867,12 @@ def enforce_decay(args: argparse.Namespace) -> None:
                     actions.append(f"[DRY-RUN] Would move {rel} to _distant/ ({days}d > {threshold}d)")
                 else:
                     _append_evolution_entry(md_file, f"--enforce 自動淘汰 ({days}d > {threshold}d)")
+                    compact_evolution_logs(md_file)
                     ok, msg = move_to_distant(md_file)
                     actions.append(f"{'OK' if ok else 'FAIL'}: {msg}")
+                    _write_audit_entry({"action": "decay", "atom": md_file.stem,
+                                        "layer": layer_name, "confidence": atom.confidence,
+                                        "days_stale": days, "type": atom.atom_type})
 
             elif atom.confidence == "[觀]":
                 if dry_run:
@@ -827,7 +898,12 @@ def enforce_decay(args: argparse.Namespace) -> None:
                                 )
                             md_file.write_text(text, encoding="utf-8")
                             _append_evolution_entry(md_file, f"標記 pending-review ({days}d > {threshold}d)")
+                            compact_evolution_logs(md_file)
                             actions.append(f"MARKED: {rel} → pending-review")
+                            _write_audit_entry({"action": "decay", "atom": md_file.stem,
+                                                "layer": layer_name, "confidence": atom.confidence,
+                                                "days_stale": days, "type": atom.atom_type,
+                                                "sub_action": "pending-review"})
                     except (OSError, UnicodeDecodeError) as e:
                         actions.append(f"FAIL: {rel} — {e}")
 
@@ -863,6 +939,64 @@ def move_to_distant(atom_path: Path) -> Tuple[bool, str]:
 # ─── Layer Discovery ─────────────────────────────────────────────────────────
 
 CLAUDE_DIR = Path.home() / ".claude"
+AUDIT_LOG_PATH = CLAUDE_DIR / "memory" / "_vectordb" / "audit.log"
+
+
+def _write_audit_entry(entry: Dict[str, Any]) -> None:
+    """Append a JSONL entry to audit.log (v2.1 Sprint 3)."""
+    entry["ts"] = datetime.now().isoformat(timespec="seconds")
+    AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def parse_audit_log() -> Dict[str, Any]:
+    """Parse audit.log JSONL and aggregate statistics (v2.1 Sprint 3)."""
+    stats: Dict[str, Any] = {
+        "total_entries": 0,
+        "by_action": {},
+        "conflicts": 0,
+        "deletes": 0,
+        "purges": 0,
+        "adds": 0,
+        "skips": 0,
+        "decays": 0,
+    }
+    if not AUDIT_LOG_PATH.exists():
+        return stats
+
+    try:
+        with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                action = entry.get("action", "unknown")
+                stats["total_entries"] += 1
+                stats["by_action"][action] = stats["by_action"].get(action, 0) + 1
+                if "conflict" in action:
+                    stats["conflicts"] += 1
+                elif action == "delete":
+                    stats["deletes"] += 1
+                elif action == "purge":
+                    stats["purges"] += 1
+                elif action == "add":
+                    stats["adds"] += 1
+                elif action == "skip":
+                    stats["skips"] += 1
+                elif action in ("decay", "enforce"):
+                    stats["decays"] += 1
+    except OSError:
+        pass
+
+    return stats
 
 
 def discover_layers(
@@ -962,6 +1096,18 @@ def generate_markdown_report(report: HealthReport) -> str:
             lines.append(f"| {d.file_a} | {d.file_b} | {triggers} | {'Yes' if d.title_match else 'No'} |")
         lines.append("")
 
+    # Audit Trail Summary (v2.1 Sprint 3)
+    if report.audit_stats and report.audit_stats.get("total_entries", 0) > 0:
+        stats = report.audit_stats
+        lines.append("## Audit Trail Summary")
+        lines.append("")
+        lines.append(f"- Total log entries: {stats['total_entries']}")
+        lines.append(f"- Write Gate adds: {stats.get('adds', 0)} | skips: {stats.get('skips', 0)}")
+        lines.append(f"- Deletes: {stats.get('deletes', 0)} | Purges: {stats.get('purges', 0)}")
+        lines.append(f"- Conflicts detected: {stats.get('conflicts', 0)}")
+        lines.append(f"- Decay actions: {stats.get('decays', 0)}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -994,6 +1140,7 @@ def generate_json_report(report: HealthReport) -> str:
             }
             for d in report.duplicates
         ],
+        "audit_stats": report.audit_stats,
     }
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -1101,6 +1248,9 @@ def run_audit(args: argparse.Namespace) -> HealthReport:
     # Detect cross-layer duplicates
     report.duplicates.extend(detect_duplicates(all_atoms))
 
+    # Audit trail statistics (v2.1 Sprint 3)
+    report.audit_stats = parse_audit_log()
+
     return report
 
 
@@ -1120,7 +1270,11 @@ def main():
     parser.add_argument("--enforce", action="store_true",
                         help="自動淘汰：[臨]>30d 移入 _distant/，[觀]>60d 標記 pending-review")
     parser.add_argument("--dry-run", action="store_true",
-                        help="搭配 --enforce，只報告不執行")
+                        help="搭配 --enforce/--compact-logs，只報告不執行")
+
+    # Evolution log compaction (v2.1 Sprint 3)
+    parser.add_argument("--compact-logs", action="store_true",
+                        help="壓縮演化日誌：超過 10 筆合併為摘要")
 
     # Delete propagation (v2.1 Sprint 2)
     parser.add_argument("--delete", type=str, metavar="ATOM_NAME",
@@ -1177,6 +1331,23 @@ def main():
     # Enforce decay (v2.1)
     if args.enforce:
         enforce_decay(args)
+        return
+
+    # Compact evolution logs (v2.1 Sprint 3)
+    if args.compact_logs:
+        layers = discover_layers(global_only=args.global_only, project_filter=args.project)
+        actions: List[str] = []
+        for layer_name, mem_dir in layers:
+            for md_file in sorted(mem_dir.glob("*.md")):
+                if md_file.name == MEMORY_INDEX or any(md_file.name.startswith(p) for p in SKIP_PREFIXES):
+                    continue
+                result = compact_evolution_logs(md_file, dry_run=args.dry_run)
+                if result:
+                    actions.append(result)
+        if actions:
+            print("\n".join(actions))
+        else:
+            print("No evolution logs require compaction.")
         return
 
     # Run audit

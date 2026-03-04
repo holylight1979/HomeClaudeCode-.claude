@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: RAG, vector, 向量, embedding, 語意, semantic, LanceDB, Ollama, 本地LLM, local LLM, sentence-transformers, qwen3-embedding, bge-m3
 - Last-used: 2026-03-04
-- Confirmations: 3
+- Confirmations: 4
 
 ## 知識
 
@@ -87,12 +87,16 @@ UserPromptSubmit (3s timeout)
 - [固] Conflict Detection：`memory-conflict-detector.py`，LLM 語意比對 AGREE/CONTRADICT/EXTEND/UNRELATED（session-end 離線路徑）
 - [固] Delete Propagation：`--delete`/`--purge` 全鏈清除（LanceDB + Related 引用 + MEMORY.md + 增量 re-index）
 
-### v2.1 Sprint 3（待實作）
+### v2.1 Sprint 3（已完成）
 
-- [觀] Three-layer type 系統（semantic/episodic/procedural 差異化淘汰）
-- [觀] Episodic memory 自動產生（session 摘要）
-- [觀] Evolution log 合併 + Token budget 改善
-- [觀] Audit trail 完善 + Dashboard + 全面測試
+- [固] Three-layer type 系統：TYPE_DECAY_MULTIPLIER（semantic=1.0, episodic=0.8, procedural=1.5）
+- [固] Supersedes 載入邏輯：被取代的舊 atom 不重複載入
+- [固] Evolution log 壓縮：`--compact-logs`，>10 筆自動合併為摘要
+- [固] Token budget 改為 char-to-token 估算：`len(content) // 4`
+- [固] Session-end 增量索引：atom 修改時 handle_session_end() 觸發 re-index
+- [固] Audit trail 升級：parse_audit_log() + 健檢報告 Audit Trail Summary
+- [固] TYPE_INTENT_BONUS：procedural+build=+0.05, episodic+recall=+0.05
+- [固] SPEC v2.1 完整更新：新增 §八 衝突偵測 + §九 Audit Trail
 - 完整計畫：`_AIDocs/AtomicMemory-v2.1-Plan.md`
 
 ## 行動
@@ -102,7 +106,7 @@ UserPromptSubmit (3s timeout)
 - 手動全量重建：`python ~/.claude/tools/rag-engine.py index`
 - 手動搜尋：`python ~/.claude/tools/rag-engine.py search "查詢"`
 - 增強搜尋：`python ~/.claude/tools/rag-engine.py search "查詢" --enhanced`
-- **v2.1 Sprint 3**：讀 `_AIDocs/AtomicMemory-v2.1-Plan.md` Phase 3 段落
+- 演化日誌壓縮：`python ~/.claude/tools/memory-audit.py --compact-logs [--dry-run]`
 - 衝突掃描：`python ~/.claude/tools/memory-conflict-detector.py [--dry-run] [--atom X]`
 - 刪除 atom：`python ~/.claude/tools/memory-audit.py --delete <name> [--layer L] [--dry-run]`
 - 永久刪除：`python ~/.claude/tools/memory-audit.py --purge <name> [--layer L]`
@@ -111,6 +115,7 @@ UserPromptSubmit (3s timeout)
 
 | 日期 | 變更 | 來源 |
 |------|------|------|
+| 2026-03-04 | v2.1 Sprint 3 完成：Type Decay + Supersedes + Log Compaction + Token Budget + Session-end Index + Audit Trail | session 實作 |
 | 2026-03-04 | v2.1 Sprint 2 完成：Intent 分類器 + Ranked Search + Related 載入 + Conflict Detector + Delete Propagation | session 實作 |
 | 2026-03-04 | v2.1 Sprint 1 完成：Schema + Write Gate + Decay --enforce + Confirmations++ | session 實作 |
 | 2026-03-04 | v2.1 缺陷研究完成：7 缺陷 + 6 系統比較 + schema + 路線圖，標為 [觀] 待實作 | session 研究 |

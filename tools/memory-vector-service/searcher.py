@@ -30,6 +30,12 @@ INTENT_WEIGHT = {
     ("preference", "design"): 1.0, ("preference", "recall"): 1.0,
 }
 
+# v2.1 Sprint 3: atom_type-level intent bonus (additive)
+TYPE_INTENT_BONUS = {
+    ("procedural", "build"): 0.05, ("procedural", "recall"): 0.03,
+    ("episodic", "recall"): 0.05, ("episodic", "debug"): 0.03,
+}
+
 
 def _classify_atom_category(hit: Dict[str, Any]) -> str:
     """Classify atom into a category for intent boosting (rule-based)."""
@@ -69,6 +75,10 @@ def _compute_final_score(hit: Dict[str, Any], intent: str) -> Dict[str, Any]:
     cat = _classify_atom_category(hit)
     intent_boost = INTENT_WEIGHT.get((cat, intent), 1.0)
 
+    # Type-level bonus (v2.1 Sprint 3)
+    atom_type = hit.get("atom_type", "semantic")
+    type_bonus = TYPE_INTENT_BONUS.get((atom_type, intent), 0.0)
+
     # Confidence
     conf = CONFIDENCE_SCORE_MAP.get(hit.get("confidence", ""), 0.5)
 
@@ -85,16 +95,18 @@ def _compute_final_score(hit: Dict[str, Any], intent: str) -> Dict[str, Any]:
              + 0.15 * recency
              + 0.20 * intent_boost
              + 0.10 * conf
-             + 0.10 * confirm_score)
+             + 0.10 * (confirm_score + type_bonus))
 
     return {
         "final_score": round(final, 4),
         "semantic": round(semantic, 4),
         "recency": round(recency, 4),
         "intent_boost": round(intent_boost, 2),
+        "type_bonus": round(type_bonus, 4),
         "confidence_score": round(conf, 2),
         "confirm_score": round(confirm_score, 4),
         "category": cat,
+        "atom_type": atom_type,
     }
 
 

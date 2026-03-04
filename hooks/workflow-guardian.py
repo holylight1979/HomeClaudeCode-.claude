@@ -189,23 +189,26 @@ def match_triggers(prompt: str, atoms: List[AtomEntry]) -> List[AtomEntry]:
 
 
 def compute_token_budget(prompt: str) -> int:
-    """Auto-adjust injection budget (in bytes) based on prompt complexity."""
+    """Auto-adjust injection budget (estimated tokens) based on prompt complexity.
+
+    Uses len(content)//4 as char-to-token estimator (v2.1 Sprint 3).
+    """
     plen = len(prompt)
     if plen < 50:
-        return 4500       # ~1500 tokens — Mode 1: light
+        return 1500       # Mode 1: light
     elif plen < 200:
-        return 9000       # ~3000 tokens — transitional
+        return 3000       # transitional
     else:
-        return 15000      # ~5000 tokens — Mode 2: deep
+        return 5000       # Mode 2: deep
 
 
 def load_atoms_within_budget(
     matched: List[AtomEntry],
     memory_dir: Path,
-    budget_bytes: int,
+    budget_tokens: int,
     already_injected: List[str],
 ) -> Tuple[List[str], List[str], int]:
-    """Load atom file contents up to budget. Returns (content_lines, injected_names, used_bytes)."""
+    """Load atom file contents up to budget. Returns (content_lines, injected_names, used_tokens)."""
     lines: List[str] = []
     injected: List[str] = []
     used = 0
@@ -222,11 +225,11 @@ def load_atoms_within_budget(
         except (OSError, UnicodeDecodeError):
             continue
 
-        content_bytes = len(content.encode("utf-8"))
-        if used + content_bytes <= budget_bytes:
+        content_tokens = len(content) // 4  # char-to-token estimate
+        if used + content_tokens <= budget_tokens:
             lines.append(f"[Atom:{name}]\n{content}")
             injected.append(name)
-            used += content_bytes
+            used += content_tokens
         else:
             # Over budget: inject summary only
             first_line = content.split("\n", 1)[0].strip("# ").strip()
@@ -509,11 +512,35 @@ def handle_user_prompt_submit(
                 kw_matched_names.add(name)
                 break
 
+    # ── Supersedes filtering (v2.1 Sprint 3) ────────────────────
+    # If atom A supersedes atom B, and both matched, drop B
+    SUPERSEDES_RE = re.compile(r"^- Supersedes:\s*(.+)", re.MULTILINE)
+    superseded_names: set = set()
+    for (name, rel_path, triggers), base_dir in matched_with_dir:
+        atom_path = (base_dir / rel_path) if rel_path else (base_dir / "memory" / f"{name}.md")
+        if not atom_path.exists():
+            continue
+        try:
+            text = atom_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            continue
+        sm = SUPERSEDES_RE.search(text)
+        if sm:
+            for old in sm.group(1).split(","):
+                old = old.strip()
+                if old:
+                    superseded_names.add(old)
+    if superseded_names:
+        matched_with_dir = [
+            entry for entry in matched_with_dir
+            if entry[0][0] not in superseded_names
+        ]
+
     # Load atoms within budget
     if matched_with_dir:
         atom_lines: List[str] = []
         newly_injected: List[str] = []
-        used_bytes = 0
+        used_tokens = 0
 
         for (name, rel_path, triggers), base_dir in matched_with_dir:
             atom_path = (base_dir / rel_path) if rel_path else (base_dir / "memory" / f"{name}.md")
@@ -524,11 +551,11 @@ def handle_user_prompt_submit(
             except (OSError, UnicodeDecodeError):
                 continue
 
-            content_bytes = len(content.encode("utf-8"))
-            if used_bytes + content_bytes <= budget:
+            content_tokens = len(content) // 4  # char-to-token estimate
+            if used_tokens + content_tokens <= budget:
                 atom_lines.append(f"[Atom:{name}]\n{content}")
                 newly_injected.append(name)
-                used_bytes += content_bytes
+                used_tokens += content_tokens
             else:
                 # Over budget: summary only
                 first_line = content.split("\n", 1)[0].strip("# ").strip()
@@ -780,6 +807,17 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
         )
 
     write_state(session_id, state)
+
+    # v2.1 Sprint 3: Trigger incremental vector index if atoms were modified
+    modified = state.get("modified_files", [])
+    has_atom_changes = any(
+        "/memory/" in m.get("path", "").replace("\\", "/")
+        and m.get("path", "").endswith(".md")
+        for m in modified
+    )
+    if has_atom_changes:
+        _trigger_incremental_index(config)
+
     sys.exit(0)
 
 

@@ -6,6 +6,7 @@
 
 | 日期 | 變更 | 涉及檔案 |
 |------|------|---------|
+| 2026-03-04 | **原子記憶 v2.1 Sprint 3 實作完成**：Type Decay Multiplier（semantic/episodic/procedural 差異化淘汰）、Supersedes 載入邏輯（被取代 atom 不載入）、Evolution Log 壓縮（`--compact-logs`）、Token Budget char-to-token 估算、Session-end 增量索引、Audit Trail 升級（parse_audit_log + 健檢報告）、TYPE_INTENT_BONUS、SPEC v2.1 完整更新（新增 §八 衝突偵測 + §九 Audit Trail + §十 版本紀錄） | `tools/memory-audit.py`, `hooks/workflow-guardian.py`, `tools/memory-vector-service/searcher.py`, `memory/SPEC_Atomic_Memory_System.md` |
 | 2026-03-04 | **原子記憶 v2.1 Sprint 2 實作完成**：Task-Intent 分類器（rule-based zero LLM）、Retrieval Ranking（5 因子加權排序 + `/search/ranked` API）、indexer metadata 擴充（last_used/confirmations/atom_type/tags）、Related 關聯載入、Conflict Detector（LLM 語意比對 AGREE/CONTRADICT/EXTEND/UNRELATED）、Delete Propagation（`--delete`/`--purge` 全鏈清除） | `hooks/workflow-guardian.py`, `tools/memory-vector-service/{indexer,searcher,service}.py`, `tools/memory-conflict-detector.py`(新), `tools/memory-audit.py` |
 | 2026-03-04 | **原子記憶 v2.1 Sprint 1 實作完成**：Schema 擴展 10 欄位、解析器升級、`--enforce` 自動淘汰、Confirmations 自動遞增、Write Gate 新建 | `memory/SPEC_Atomic_Memory_System.md`, `tools/memory-audit.py`, `hooks/workflow-guardian.py`, `tools/memory-write-gate.py`(新), `workflow/config.json` |
 | 2026-03-04 | **原子記憶 v2.1 研究計畫**：7 大缺陷 + 6 系統比較 + schema + 排序公式 + 治理機制 + 3 階段路線圖 | `_AIDocs/AtomicMemory-v2.1-Plan.md` |
