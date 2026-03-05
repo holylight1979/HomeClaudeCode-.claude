@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 CLAUDE_DIR = Path.home() / ".claude"
 WORKFLOW_DIR = CLAUDE_DIR / "workflow"
 MEMORY_DIR = CLAUDE_DIR / "memory"
+EPISODIC_DIR = MEMORY_DIR / "episodic"
 CONFIG_PATH = WORKFLOW_DIR / "config.json"
 MEMORY_INDEX = "MEMORY.md"
 
@@ -1663,7 +1664,8 @@ def _generate_episodic_atom(
     expires = (datetime.now() + timedelta(days=24)).strftime("%Y-%m-%d")
     triggers = _generate_triggers(state, summary["work_areas"])
 
-    atom_path = _resolve_episodic_filename(MEMORY_DIR, date_compact, slug)
+    EPISODIC_DIR.mkdir(parents=True, exist_ok=True)
+    atom_path = _resolve_episodic_filename(EPISODIC_DIR, date_compact, slug)
     atom_name = atom_path.stem
 
     # Build knowledge lines
