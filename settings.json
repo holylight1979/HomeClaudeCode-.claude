@@ -54,7 +54,8 @@
       "Bash(cmd /c \"npx -y computer-use-mcp --help\")",
       "mcp__workflow-guardian__workflow_signal",
       "mcp__workflow-guardian__workflow_status",
-      "Bash(ollama --version)"
+      "Bash(ollama --version)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\([m[''name''] for m in d.get\\(''models'',[]\\)]\\)\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\holylight\\.claude",
