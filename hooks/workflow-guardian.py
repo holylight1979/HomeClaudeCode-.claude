@@ -1863,6 +1863,11 @@ HANDLERS = {
 
 
 def main():
+    # Force UTF-8 output on Windows
+    if sys.platform == "win32":
+        sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', closefd=False)
+        sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', closefd=False)
+
     WORKFLOW_DIR.mkdir(parents=True, exist_ok=True)
 
     # Read JSON from stdin
