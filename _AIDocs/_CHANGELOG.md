@@ -6,6 +6,7 @@
 
 | 日期 | 變更 | 影響檔案 |
 |------|------|---------|
+| 2026-03-05 | V2.4 環境掃描整理：Architecture.md + Project_File_Tree.md 更新到 V2.4（回應捕獲/跨 Session 鞏固/episodic 子資料夾）、SPEC 修正過時引用（LanceDB→ChromaDB, qwen3:4b→1.7b, min_score 0.65→0.45）、_INDEX.md 修正 hook 數量、全文件交叉比對一致性確認 | _AIDocs/*, SPEC, _INDEX.md |
 | 2026-03-05 | V2.3 全面升級 OpenClaw Phase 1+2: MEMORY.md 重寫(155行→33行,3欄格式)、建立 root CLAUDE.md、4個新 atom(architecture/setup-guide/taxonomy/self-iteration)、更新 config-intelligence | MEMORY.md, CLAUDE.md, 4 new atoms, config-intelligence |
 | 2026-03-05 | 建立 README.md（設計哲學、Token 對比、流程圖 x2、大型專案使用法）+ Install-forAI.md 安裝指南 | README.md, Install-forAI.md, memory/decisions.md |
 | 2026-03-05 | 原子記憶 V2.3 S5: OpenClaw atoms 整合 — indexer.py 支援多來源目錄 + 遞迴掃描 + skip_files，config.json 加 additional_atom_dirs，memory-v2-cc.md 標記 deprecated | indexer.py, config.py, config.json, memory-v2-cc.md |

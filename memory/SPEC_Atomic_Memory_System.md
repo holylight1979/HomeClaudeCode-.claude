@@ -466,17 +466,17 @@ python memory-write-gate.py --content "知識文字" [--classification "[觀]"] 
 | 元件 | 位置 | 用途 |
 |------|------|------|
 | Memory Vector Service | `tools/memory-vector-service/service.py` | HTTP daemon @ port 3849 |
-| indexer.py | 同目錄 | 段落級 atom chunking + embedding + LanceDB |
+| indexer.py | 同目錄 | 段落級 atom chunking + embedding + ChromaDB |
 | searcher.py | 同目錄 | 語意搜尋 + ranked search (v2.1) |
 | reranker.py | 同目錄 | LLM re-ranking / query rewrite / 知識萃取 |
 | rag-engine.py | `tools/rag-engine.py` | CLI 入口 |
-| LanceDB | `memory/_vectordb/` | 向量持久化存儲 |
+| ChromaDB | `memory/_vectordb/` | 向量持久化存儲 |
 
 ### 7.3 Embedding 模型（雙軌）
 
 | 後端 | 模型 | 用途 |
 |------|------|------|
-| Ollama | `qwen3-embedding` | 主力（MTEB 多語言 #1） |
+| Ollama | `qwen3-embedding:0.6b` | 主力（MTEB 多語言 #1） |
 | sentence-transformers | `BAAI/bge-m3` | Fallback（Ollama 未啟動時） |
 
 ### 7.4 索引策略
@@ -529,9 +529,9 @@ INTENT_PATTERNS = {
 
 | 功能 | 模型 | 觸發 | 延遲 |
 |------|------|------|------|
-| 查詢改寫 | qwen3:4b | `rag-engine.py search --enhanced` | ~2s |
-| Re-ranking | qwen3:4b | `rag-engine.py search --rerank` | ~4s |
-| 知識萃取 | qwen3:4b | session 結束同步 | ~3s |
+| 查詢改寫 | qwen3:1.7b | `rag-engine.py search --enhanced` | ~2s |
+| Re-ranking | qwen3:1.7b | `rag-engine.py search --rerank` | ~4s |
+| 知識萃取 | qwen3:1.7b | session 結束同步 | ~3s |
 
 ### 7.7 設定
 
@@ -542,12 +542,12 @@ INTENT_PATTERNS = {
   "enabled": true,
   "service_port": 3849,
   "embedding_backend": "ollama",
-  "embedding_model": "qwen3-embedding",
+  "embedding_model": "qwen3-embedding:0.6b",
   "fallback_backend": "sentence-transformers",
   "fallback_model": "BAAI/bge-m3",
-  "ollama_llm_model": "qwen3:4b",
+  "ollama_llm_model": "qwen3:1.7b",
   "search_top_k": 5,
-  "search_min_score": 0.65,
+  "search_min_score": 0.45,
   "search_timeout_ms": 2000,
   "auto_start_service": true,
   "auto_index_on_change": true
