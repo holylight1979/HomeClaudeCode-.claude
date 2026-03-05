@@ -966,6 +966,26 @@ def handle_user_prompt_submit(
 
     write_state(session_id, state)
 
+    # ─── V2.4: Spawn detached extraction subprocess BEFORE output ──
+    # output_json/output_nothing call sys.exit(0), so this must come first.
+    # Subprocess survives parent exit — hook has 3s timeout but extraction needs ~30s.
+    rc = config.get("response_capture", {})
+    if rc.get("enabled", True) and rc.get("per_turn_enabled", True):
+        cwd = state.get("session", {}).get("cwd", "")
+        if cwd and state.get("session_context_injected", False):
+            import subprocess
+            extract_script = str(Path(__file__).parent / "extract-worker.py")
+            config_json = json.dumps(config)
+            try:
+                subprocess.Popen(
+                    [sys.executable, extract_script, session_id, cwd, config_json],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except OSError:
+                pass  # Non-critical
+
     if lines:
         output_json({
             "hookSpecificOutput": {
@@ -975,19 +995,6 @@ def handle_user_prompt_submit(
         })
     else:
         output_nothing()
-
-    # ─── V2.4: Launch background extraction of last assistant response ──
-    rc = config.get("response_capture", {})
-    if rc.get("enabled", True) and rc.get("per_turn_enabled", True):
-        cwd = state.get("session", {}).get("cwd", "")
-        if cwd and state.get("session_context_injected", False):
-            # Only after first prompt (there's no previous response on first prompt)
-            t = threading.Thread(
-                target=_async_extract_last_response,
-                args=(session_id, cwd, config),
-                daemon=True,
-            )
-            t.start()
 
 
 def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> None:
