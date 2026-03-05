@@ -1237,13 +1237,17 @@ def _extract_all_assistant_texts(transcript_path: Path, max_chars: int = 20000) 
 
 
 def _call_ollama_generate(prompt: str, model: str = "qwen3:1.7b",
-                          timeout: int = 3) -> str:
-    """Call Ollama generate API. Returns raw response text."""
+                          timeout: int = 120) -> str:
+    """Call Ollama generate API. Returns raw response text.
+
+    Default timeout=120s: qwen3 thinking mode needs ~30s on GTX 1050 Ti.
+    Background threads (extraction) can afford to wait.
+    """
     payload = json.dumps({
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.1, "num_predict": 500}
+        "options": {"temperature": 0.1, "num_predict": 2048}
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -1286,20 +1290,18 @@ def _llm_extract_knowledge(text: str, existing_queue: List[dict],
     if not text or len(text) < 50:
         return []
 
-    # Source-dependent limits
+    # Source-dependent limits (timeout handled by _call_ollama_generate default)
     if source == "per-turn":
         max_chars = 3000
         max_items = 2
-        timeout = 3
     else:  # session-end
         max_chars = 4000
         max_items = 5
-        timeout = 10
 
     truncated = text[:max_chars]
     prompt = _EXTRACT_PROMPT_TEMPLATE.format(text=truncated)
 
-    raw = _call_ollama_generate(prompt, timeout=timeout)
+    raw = _call_ollama_generate(prompt)
     if not raw:
         return []
 
