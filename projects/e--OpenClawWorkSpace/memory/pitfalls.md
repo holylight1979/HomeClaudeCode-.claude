@@ -3,7 +3,7 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-02-26~27 holylight — 安裝、整合、除錯過程中踩到的坑
-- Last-used: 2026-03-04
+- Last-used: 2026-03-05
 - Trigger: 遇到錯誤訊息、異常行為、啟動失敗、設定不生效、沒有回應、連不上、Discord bot、webhook 失敗、ngrok error、404、502
 - Privacy: public
 
@@ -46,6 +46,12 @@
 | `blockStreaming: true` + `streaming: "off"` = **deadlock** | streaming off 不產生 streaming 事件，blockStreaming 等信號永不來 → 訊息卡住永不送出。正確：`blockStreaming: false` |
 | user-level config 有 `channels.discord` → Discord DM 靜默丟棄 | user-level 的 channel 設定在 merge 時干擾 workspace 完整設定（缺 token/dmPolicy 等）。**user-level 不應有任何 channel 設定** |
 | user-level plugin entries 列已移除的 plugin → 載入異常 | 2026.3.2 移除了 `discord-reader`/`computer-use`/`claude-bridge`，user-level 殘留 entries 需清理 |
+| Heartbeat nagging loop: 相同警報 30+ 次重複無法自動解決 | 需加入 auto-resolution 或 N 次後靜音機制。目前只能人工介入 |
+| Weekly identity report cron 失敗 | 需要建立 `atoms/persons/_registry.md` 等基礎路徑（已有但格式/內容不足） |
+| LINE 無法回傳圖片 | LINE channel 可收圖但無法主動發送圖片/截圖給使用者 |
+| Google Maps goo.gl 短網址無法解析 | OpenClaw 無法展開 Google Maps 短網址取得實際地址 |
+| 工作空間沙箱限制 (`workspaceOnly`) | 無法寫入 `平台工作空間\`，需調整 `fs.workspaceOnly` 設定或使用 workspace 內路徑 |
+| Discord 洗版問題（長內容分割） | 長 JSON/markdown 用「摘要 + 檔案附件」策略，已建立 discord-global-policy.md |
 
 ## 行動
 

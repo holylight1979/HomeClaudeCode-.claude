@@ -3,7 +3,7 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-02-26 holylight — OpenClaw 初始安裝至 Bridge 整合全過程
-- Last-used: 2026-03-04
+- Last-used: 2026-03-05
 - Trigger: 修改 OpenClaw 配置、安裝升級、安全策略討論、平台整合問題、ngrok 啟動、Discord 設定、LINE 設定、sandbox、Gateway auth
 - Privacy: public
 
@@ -22,6 +22,8 @@
 - config deny > prompt（compaction 會丟 prompt 級指令）
 - 2026-02-27 轉為全面放權：`exec.security: "full"` + `exec.ask: "off"` + `fs.workspaceOnly: false` + `elevated.enabled: true`
 - 版本 >= 2026.1.29（CVE-2026-25253, CVSS 8.8）
+- kill switch 機制：`停下來` (stop) / `你繼續` (resume) — Discord 內有效
+- OpenClaw 正確拒絕「最高優先級覆蓋」特權升級嘗試
 
 ### 安裝方式
 - `npm install -g openclaw@latest`（非原始碼建置，Windows pnpm build 會失敗）
@@ -60,6 +62,16 @@
 ### GitHub Repo
 - `holylight1979/OpenClaw-AtomicMemory`（Public）
 - Secrets 用 `{{PLACEHOLDER}}`，openclaw.json 需 merge 升級
+
+### Discord 行為規則
+- 長內容輸出：摘要 + 檔案附件（不分割訊息洗版）
+- 行為規則文件化至 AGENTS.md + discord-global-policy.md
+- dialog-level 行為可調，system-level 行為需修改系統設定
+
+### 跨平台協作
+- LINE → OpenClaw → Claude Code inject/observe 模式已建立
+- OpenClaw 可透過 inbox.jsonl 向 Claude Code 發送任務
+- 無法從 LINE 端直接確認 Claude Code 執行狀態
 
 ## 行動
 

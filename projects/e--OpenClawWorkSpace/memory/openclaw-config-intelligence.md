@@ -183,3 +183,5 @@ webhook HTTP handler
 - 除錯時：先用 curl 手動發 webhook 分離問題（簽名 vs 路由 vs LLM）
 - 調整 delivery 行為：先確認三件套（streaming + blockStreaming + blockStreamingBreak），再調 coalesce
 - 調整 queue 行為：先確認 queue.mode，再調 debounceMs 和 cap
+- Discord 長輸出問題已解決：摘要 + 檔案附件策略（寫入 discord-global-policy.md）
+- LINE 群組三層設定已確認可正常運作（Tesla 配件群組為實例驗證）
