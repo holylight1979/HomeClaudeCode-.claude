@@ -433,4 +433,4 @@ flowchart TD
 
 ## License
 
-Personal project by holyl. Not licensed for redistribution.
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
