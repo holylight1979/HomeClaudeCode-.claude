@@ -751,6 +751,28 @@ def handle_user_prompt_submit(
     # Match prompt against triggers (keyword)
     matched_with_dir: List[Tuple[AtomEntry, Path]] = []
     prompt_lower = prompt.lower()
+
+    # ── Cross-project atom discovery (v2.5) ─────────────────────────
+    # Scan ALL project memory dirs for trigger matches, not just CWD project.
+    loaded_proj_names = set()
+    if proj_dir_str:
+        loaded_proj_names.add(Path(proj_dir_str).parent.name)
+    projects_dir = CLAUDE_DIR / "projects"
+    if projects_dir.is_dir():
+        for proj_dir in projects_dir.iterdir():
+            if not proj_dir.is_dir() or proj_dir.name in loaded_proj_names:
+                continue
+            cross_mem = proj_dir / "memory"
+            if not cross_mem.exists():
+                continue
+            cross_atoms = parse_memory_index(cross_mem)
+            if not cross_atoms:
+                continue
+            cross_parent = cross_mem.parent
+            for name, rel_path, triggers in cross_atoms:
+                if name not in already_injected and any(kw in prompt_lower for kw in triggers):
+                    all_atoms.append(((name, rel_path, triggers), cross_parent))
+                    lines.append(f"[Guardian:CrossProject] {proj_dir.name}/{name} matched")
     for (name, rel_path, triggers), base_dir in all_atoms:
         if name not in already_injected and any(kw in prompt_lower for kw in triggers):
             matched_with_dir.append(((name, rel_path, triggers), base_dir))
@@ -1839,9 +1861,11 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
         )
 
     # v2.1 Task #2: Auto-generate episodic atom
+    episodic_generated = False
     if config.get("episodic", {}).get("auto_generate", True):
         try:
             _generate_episodic_atom(session_id, state, config)
+            episodic_generated = True
         except Exception as e:
             print(f"[episodic] generation failed: {e}", file=sys.stderr)
 
@@ -1854,7 +1878,7 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
         and m.get("path", "").endswith(".md")
         for m in modified
     )
-    if has_atom_changes:
+    if has_atom_changes or episodic_generated:
         _trigger_incremental_index(config)
 
     sys.exit(0)
