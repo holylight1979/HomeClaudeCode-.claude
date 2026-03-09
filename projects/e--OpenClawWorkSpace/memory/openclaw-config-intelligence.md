@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-02-28 holylight — 逆向 openclaw dist source + 實際除錯驗證
-- Last-used: 2026-03-05
+- Last-used: 2026-03-06
+- Confirmations: 9
 - Trigger: 修改 openclaw.json 設定、新增 channel/group、除錯設定不生效、理解參數關係
 - Privacy: public
 

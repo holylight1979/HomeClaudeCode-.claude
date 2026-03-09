@@ -114,7 +114,7 @@ def write_state(session_id: str, state: Dict[str, Any]) -> None:
 def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
     """Create a fresh state object."""
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "session": {
             "id": session_id,
             "started_at": _now_iso(),
@@ -135,6 +135,12 @@ def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
             "related_episodic": [],
         },
         "session_context_injected": False,
+        # V2.6: Self-iteration metrics
+        "iteration_metrics": {
+            "atoms_referenced": [],   # atom names loaded this session
+            "atoms_modified": [],     # atom names modified this session
+            "quality_signals": [],    # [{atom, signal(+/-/0), at}]
+        },
         "last_updated": _now_iso(),
     }
 
@@ -676,6 +682,14 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         if p_names:
             lines.append(f"Project atoms: {', '.join(p_names)}.")
         lines.append("I will track file modifications and remind you to sync before ending.")
+
+    # ── V2.6: Periodic review check ─────────────────────────────────────
+    try:
+        review_reminder = _check_periodic_review_due(config)
+        if review_reminder:
+            lines.append(review_reminder)
+    except Exception as e:
+        print(f"[v2.6] Review check error: {e}", file=sys.stderr)
 
     # ── Vector Service auto-start ──────────────────────────────────────
     if config.get("vector_search", {}).get("auto_start_service", True):
@@ -1765,6 +1779,200 @@ def _generate_episodic_atom(
     return atom_name
 
 
+# ─── V2.6: Self-Iteration Engine ────────────────────────────────────────────
+
+
+def _collect_iteration_metrics(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Collect self-iteration metrics from session state.
+
+    Gathers atoms referenced (injected_atoms) and atoms modified
+    (modified_files matching memory/*.md) into iteration_metrics.
+    """
+    metrics = state.get("iteration_metrics", {})
+
+    # Atoms referenced this session
+    referenced = list(set(state.get("injected_atoms", [])))
+    metrics["atoms_referenced"] = referenced
+
+    # Atoms modified this session (extract atom names from modified file paths)
+    modified_atoms = []
+    for m in state.get("modified_files", []):
+        p = m.get("path", "").replace("\\", "/")
+        if "/memory/" in p and p.endswith(".md"):
+            name = p.rsplit("/", 1)[-1].replace(".md", "")
+            if name not in ("MEMORY", "_CHANGELOG", "_CHANGELOG_ARCHIVE"):
+                modified_atoms.append(name)
+    metrics["atoms_modified"] = list(set(modified_atoms))
+
+    return metrics
+
+
+def _detect_oscillation(
+    state: Dict[str, Any], config: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Detect atoms modified 2+ times across last 3 sessions (oscillation).
+
+    Scans recent episodic atoms for overlapping atom modification patterns.
+    Returns list of {atom, sessions, recommendation}.
+    """
+    oscillation_window = config.get("self_iteration", {}).get("oscillation_window", 3)
+    oscillation_threshold = config.get("self_iteration", {}).get("oscillation_threshold", 2)
+
+    # Find recent episodic atoms
+    episodic_dirs = set()
+    # Global episodic
+    global_ep = MEMORY_DIR / "episodic"
+    if global_ep.exists():
+        episodic_dirs.add(global_ep)
+    # Project episodic
+    cwd = state.get("session", {}).get("cwd", "")
+    proj_mem = get_project_memory_dir(cwd)
+    if proj_mem:
+        proj_ep = proj_mem / "episodic"
+        if proj_ep.exists():
+            episodic_dirs.add(proj_ep)
+
+    # Collect recent episodic files (sorted by mtime, newest first)
+    recent_files = []
+    for ep_dir in episodic_dirs:
+        for f in ep_dir.glob("episodic-*.md"):
+            recent_files.append((f.stat().st_mtime, f))
+    recent_files.sort(key=lambda x: -x[0])
+    recent_files = recent_files[:oscillation_window]
+
+    # Parse each episodic for modified atoms
+    atom_sessions = {}  # atom_name -> [session_dates]
+    for _, ep_path in recent_files:
+        try:
+            text = ep_path.read_text(encoding="utf-8")
+            date_match = re.search(r"Created:\s*(\d{4}-\d{2}-\d{2})", text)
+            ep_date = date_match.group(1) if date_match else ep_path.stem[:15]
+            # Look for "修改" or "工作區域" lines referencing atoms
+            for line in text.split("\n"):
+                if "引用 atoms:" in line:
+                    atoms_part = line.split("引用 atoms:")[-1].strip()
+                    for a in atoms_part.split(","):
+                        a = a.strip()
+                        if a:
+                            atom_sessions.setdefault(a, []).append(ep_date)
+        except (OSError, UnicodeDecodeError):
+            continue
+
+    # Also include current session's modified atoms
+    current_modified = state.get("iteration_metrics", {}).get("atoms_modified", [])
+    today = datetime.now().strftime("%Y-%m-%d")
+    for a in current_modified:
+        atom_sessions.setdefault(a, []).append(today)
+
+    # Detect oscillation: same atom touched in N+ distinct sessions
+    oscillations = []
+    for atom_name, sessions in atom_sessions.items():
+        unique_sessions = list(set(sessions))
+        if len(unique_sessions) >= oscillation_threshold:
+            oscillations.append({
+                "atom": atom_name,
+                "sessions": unique_sessions,
+                "count": len(unique_sessions),
+                "recommendation": "暫停修改此 atom，等待更多證據再決定方向"
+            })
+
+    return oscillations
+
+
+def _calculate_maturity_phase(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Calculate system maturity phase based on episodic atom count.
+
+    Returns {phase, total_sessions, description}.
+    Phases: learning (<15), stable (15-50), mature (>50)
+    """
+    thresholds = config.get("self_iteration", {}).get("maturity_thresholds", {})
+    learning_max = thresholds.get("learning", 15)
+    stable_max = thresholds.get("stable", 50)
+
+    # Count all episodic atoms across all known directories
+    total = 0
+    for ep_dir in [MEMORY_DIR / "episodic"]:
+        if ep_dir.exists():
+            total += sum(1 for _ in ep_dir.glob("episodic-*.md"))
+
+    # Also check project episodic dirs
+    projects_dir = CLAUDE_DIR / "projects"
+    if projects_dir.exists():
+        for proj in projects_dir.iterdir():
+            ep = proj / "memory" / "episodic"
+            if ep.exists():
+                total += sum(1 for _ in ep.glob("episodic-*.md"))
+
+    if total < learning_max:
+        phase = "learning"
+        desc = f"學習期（{total}/{learning_max} sessions）— 積極學習新模式"
+    elif total < stable_max:
+        phase = "stable"
+        desc = f"穩定期（{total}/{stable_max} sessions）— 收斂規則，減少新增"
+    else:
+        phase = "mature"
+        desc = f"成熟期（{total} sessions）— 極少新增，專注精煉"
+
+    return {"phase": phase, "total_sessions": total, "description": desc}
+
+
+def _check_periodic_review_due(config: Dict[str, Any]) -> Optional[str]:
+    """Check if periodic self-review is due.
+
+    Counts episodic atoms since last review marker.
+    Returns review reminder text if due, None otherwise.
+    """
+    review_interval = config.get("self_iteration", {}).get("review_interval", 6)
+    marker_path = WORKFLOW_DIR / "last_review_marker.json"
+
+    # Read last review marker
+    last_review_session_count = 0
+    if marker_path.exists():
+        try:
+            with open(marker_path, "r", encoding="utf-8") as f:
+                marker = json.load(f)
+            last_review_session_count = marker.get("session_count", 0)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Count current total sessions
+    total = 0
+    for ep_dir in [MEMORY_DIR / "episodic"]:
+        if ep_dir.exists():
+            total += sum(1 for _ in ep_dir.glob("episodic-*.md"))
+    projects_dir = CLAUDE_DIR / "projects"
+    if projects_dir.exists():
+        for proj in projects_dir.iterdir():
+            ep = proj / "memory" / "episodic"
+            if ep.exists():
+                total += sum(1 for _ in ep.glob("episodic-*.md"))
+
+    sessions_since_review = total - last_review_session_count
+    if sessions_since_review >= review_interval:
+        maturity = _calculate_maturity_phase(config)
+        return (
+            f"[自我迭代] 定期檢閱到期（距上次 {sessions_since_review} sessions）。"
+            f"系統{maturity['description']}。"
+            f"建議在適當時機進行近期 session 回顧：掃描 episodic atoms、"
+            f"找出重複模式、收攏或晉升規則。"
+        )
+    return None
+
+
+def _save_review_marker(total_sessions: int) -> None:
+    """Save review marker after a periodic review is completed."""
+    marker_path = WORKFLOW_DIR / "last_review_marker.json"
+    marker = {
+        "session_count": total_sessions,
+        "reviewed_at": _now_iso(),
+    }
+    try:
+        with open(marker_path, "w", encoding="utf-8") as f:
+            json.dump(marker, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
 def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> None:
     session_id = input_data.get("session_id", "")
     state = read_state(session_id)
@@ -1827,6 +2035,23 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
             f"{mod_count} modified files, {kq_count} knowledge items.",
             file=sys.stderr,
         )
+
+    # ─── V2.6: Self-iteration metrics + oscillation detection ──────
+    try:
+        metrics = _collect_iteration_metrics(state)
+        state["iteration_metrics"] = metrics
+
+        oscillations = _detect_oscillation(state, config)
+        if oscillations:
+            state["iteration_metrics"]["oscillations"] = oscillations
+            for osc in oscillations:
+                print(
+                    f"[v2.6] Oscillation detected: {osc['atom']} "
+                    f"({osc['count']} sessions)",
+                    file=sys.stderr,
+                )
+    except Exception as e:
+        print(f"[v2.6] Self-iteration metrics error: {e}", file=sys.stderr)
 
     # v2.1 Task #2: Auto-generate episodic atom
     if config.get("episodic", {}).get("auto_generate", True):

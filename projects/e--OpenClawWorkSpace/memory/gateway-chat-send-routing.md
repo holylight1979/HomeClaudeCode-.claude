@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-03-04 holylight — OpenClaw 2026.3.1 source code analysis
-- Last-used: 2026-03-04
+- Last-used: 2026-03-06
+- Confirmations: 7
 - Trigger: chat.send 行為、LINE 推送、cross-context messaging、session routing、deliverOutboundPayloads、OriginatingChannel、LINE Push API
 - Privacy: public
 

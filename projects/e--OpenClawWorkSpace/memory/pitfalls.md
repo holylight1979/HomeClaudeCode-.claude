@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-02-26~27 holylight — 安裝、整合、除錯過程中踩到的坑
-- Last-used: 2026-03-05
+- Last-used: 2026-03-06
+- Confirmations: 5
 - Trigger: 遇到錯誤訊息、異常行為、啟動失敗、設定不生效、沒有回應、連不上、Discord bot、webhook 失敗、ngrok error、404、502
 - Privacy: public
 
@@ -54,6 +55,15 @@
 | Google Maps goo.gl 短網址無法解析 | OpenClaw 無法展開 Google Maps 短網址取得實際地址 |
 | 工作空間沙箱限制 (`workspaceOnly`) | 無法寫入 `平台工作空間\`，需調整 `fs.workspaceOnly` 設定或使用 workspace 內路徑 |
 | Discord 洗版問題（長內容分割） | 長 JSON/markdown 用「摘要 + 檔案附件」策略，已建立 discord-global-policy.md |
+| workspace hooks 不會自動載入 | `workspace/hooks/` 有 HOOK.md + handler.ts 不代表已安裝。必須跑 `openclaw hooks install <path>` 才會複製到 `~/.openclaw/hooks/` 並生效 |
+| `message:sent` 事件不觸發（所有 auto-reply） | v2026.3.2 的 auto-reply pipeline（Discord/LINE）完全繞過 `deliverOutboundPayloads`，走 reply dispatcher → channel plugin。`message:sent` 只在 CLI `--deliver` 和 cron 時觸發。**已解決**：memory-writer V4 改用 `message:before` + transcript reading |
+| hook 安裝位置混淆 | 開發目錄 `.openclaw/workspace/hooks/` 是原始碼；運行目錄 `~/.openclaw/hooks/` 是 Gateway 實際載入的位置。修改後需重新 `openclaw hooks install` 同步 |
+| atom-context-injector 注入依賴 bootstrapFiles | hook 透過 `ctx.bootstrapFiles` 找 USER.md 並 append content。若 USER.md 不存在或 missing=true，注入靜默失敗 |
+| Gateway 啟動不帶 `OPENCLAW_CONFIG_PATH` → 用錯 config | `openclaw gateway --force` 不會自動帶 env var；必須用 `start-gateway.bat`（內含 `set OPENCLAW_CONFIG_PATH=...`）或手動設定。用錯 config 會導致 model 錯誤 + hooks 不載入 |
+| `ctx.workspaceDir` 不是 internal workspace | hook 收到的 `ctx.workspaceDir` 是專案根 `E:\OpenClawWorkSpace`，不是 `.openclaw/workspace/`。存取 atoms/preprocessor 需自行拼接 `.openclaw/workspace/` |
+| `.openclaw/workspace/` 是獨立 git repo | 父 repo 無法用 `git add` 追蹤其檔案。workspace 的 hooks/atoms 需在 workspace repo 內 commit |
+| session 級「記住」不跨頻道 | agent 收到「記住 X」時只存在當前 session context，不會自動寫入 atom。需要 agent 主動 fs_write 或 memory-writer hook 觸發。**已解決**：memory-writer V4 正常運作 |
+| workspace hooks `.ts` 載入失敗（靜默） | `.openclaw/workspace/package.json` 有 `"type": "commonjs"`，導致 hooks 的 `.ts` 檔案被當 CJS → `import` 語句 SyntaxError。Gateway 的 `catch` 靜默吞掉錯誤。**修法**：在 `workspace/hooks/` 加 `package.json` with `"type": "module"` |
 
 ## 行動
 

@@ -1,6 +1,6 @@
-# 原子記憶系統規格 v2.5
+# 原子記憶系統規格 v2.6
 
-> Atomic Memory System V2.5 Specification
+> Atomic Memory System V2.6 Specification
 > 適用於 Claude Code 跨 session 知識管理。
 > V2：Hybrid RECALL — Keyword Trigger + Vector Semantic Search + Local LLM
 > V2.1 Sprint 1：Write Gate + Decay Enforce + Schema 擴展 + Confirmations 自動遞增
@@ -9,6 +9,7 @@
 > V2.4 Phase 1+2：回應知識捕獲（本地 LLM 逐輪+SessionEnd 萃取）+ 兩層分類（Scope×Type）
 > V2.4 Phase 3：跨 Session 鞏固（向量比對自動晉升）
 > V2.5：Hybrid Search Keyword Boost + Self-healing Collection Cache
+> V2.6：Self-Iteration Engine — 品質函數 + 震盪偵測 + 成熟度模型 + 定期檢閱觸發 + 8 條演進原則
 
 ---
 

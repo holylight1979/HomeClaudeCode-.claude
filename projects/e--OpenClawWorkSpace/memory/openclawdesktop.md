@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [觀]
 - Source: 2026-02-28 holylight — 新建專案
-- Last-used: 2026-03-03
+- Last-used: 2026-03-05
+- Confirmations: 4
 - Trigger: 涉及桌面自動化 MCP、截圖、UI Automation、SendInput、DPI 問題、desktop automation、OpenClawDesktop
 - Privacy: public
 

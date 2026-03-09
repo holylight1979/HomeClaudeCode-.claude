@@ -10,7 +10,7 @@
 ## 知識
 
 ### 核心架構
-- [固] 原子記憶 V2.5：Hybrid RECALL + Ranked Search + Keyword Boost + Self-healing Cache + 回應捕獲 + 跨 Session 鞏固 + Workflow Guardian
+- [固] 原子記憶 V2.6：V2.5 + Self-Iteration Engine（品質函數 + 震盪偵測 + 成熟度模型 + 定期檢閱 + 8 條演進原則）
 - [固] 雙 LLM：Claude Code（雲端決策）+ Ollama qwen3（本地語意處理）
 - [固] 7 hook 事件全由 workflow-guardian.py 統一處理（SessionStart/UserPromptSubmit/PostToolUse/PreCompact/Stop/SessionEnd + PreToolUse 由 inbox-check.js）
 
@@ -58,15 +58,23 @@
 - [固] **命名粒度**：一個工作單元 = 一個可獨立描述的成果或決策。太大則拆分，太小則合併
 - [固] **命名時機**：(1) 開始執行一個有意義的修改前 (2) 使用者給出明確指示時 (3) 發現重要邏輯洞察時 (4) debug 進入反覆修正時
 
-### 自我迭代原則（Self-Iteration）
-- [固] **記憶系統自我演進**：原子記憶不只記錄事實，系統本身也隨使用深化。每次 Claude 閱讀、執行、達成目標的過程中，應主動抽取可提升「良善」「協助」「精確」的關鍵邏輯
-- [固] **演進維度**：(1) 精確度 — 發現更好的判斷模式時更新行動規則 (2) 協助力 — 識別使用者未明說但反覆需要的支援模式 (3) 良善性 — 降低使用者認知負擔、減少來回確認的摩擦
-- [固] **演進觸發**：(1) 同類問題第 2 次出現 → 記錄模式 (2) 使用者糾正 Claude 的判斷 → 更新規則 (3) 某個行動規則連續 3+ 次被跳過 → 檢討是否該淘汰 (4) 新的工具/流程被確認有效 → 納入標準流程
-- [固] **演進邊界**：自我迭代只更新「行動」和「知識」段落，不自行修改「元資料」的 Confidence 層級（晉升仍需使用者確認或跨 session 鞏固機制）
-- [固] **定期檢閱週期**：每 5±2 個 session（約 3~7 個），Claude 應主動進行一次近期 session 回顧
-- [固] **檢閱內容**：(1) 掃描近期 episodic atoms + knowledge_queue (2) 找出重疊性高的使用者要求模式 (3) 將反覆出現的要求收攏為 [觀] 或晉升為 [固] (4) 更新向量資料庫
-- [固] **檢閱觸發判斷**：Claude 在 SessionStart 時檢查 episodic 目錄的 atom 數量與最後檢閱時間，超過週期則在適當時機（任務間隙或使用者首發後）主動提出
-- [固] **檢閱輸出**：產出簡短報告 — 發現的重複模式、建議的晉升/合併、已執行的更新。報告本身不另存檔，結果直接寫入對應 atom
+### 自我迭代引擎（Self-Iteration V2.6）
+- [固] **8 條演進原則**（跨學科理論背書，詳見 `memory/openclaw-self-iteration.md`）：
+  - (1) 品質函數：確認(+)/糾正(−)/無回饋(0) 三類訊號驅動規則調整
+  - (2) 收斂優先：規則總數趨向收斂，新增前先檢查可合併的既有規則
+  - (3) 證據門檻：≥2 次獨立 session 觀察才建立正式規則（hook 自動追蹤）
+  - (4) 淘汰勇氣：每新增 1 條 → 檢查淘汰 1 條（Via negativa）
+  - (5) 震盪偵測：3 session 內同 atom 改 2+ 次 → 暫停（hook 自動偵測）
+  - (6) 成熟度模型：學習期(<15)/穩定期(15-50)/成熟期(>50)（hook 自動計算）
+  - (7) 三維演進：精確度/協助力/良善性 Pareto 平衡
+  - (8) 演進邊界：只改行動/知識，絕對禁止自改 Confidence
+- [固] **自動化基礎設施**：
+  - SessionEnd: `_collect_iteration_metrics()` 收集 atoms_referenced + atoms_modified
+  - SessionEnd: `_detect_oscillation()` 掃描近 3 session episodic 偵測震盪
+  - SessionStart: `_check_periodic_review_due()` 檢查定期檢閱是否到期（預設每 6 session）
+  - SessionStart: `_calculate_maturity_phase()` 計算系統成熟度階段
+  - State schema 1.2: 新增 `iteration_metrics` 欄位
+- [固] **定期檢閱流程**：hook 觸發提醒 → Claude 掃描 episodic + knowledge_queue → 收攏/晉升規則 → 寫入 `workflow/last_review_marker.json` 重置計數器
 
 ### 歷史決策
 - [固] 記憶檢索統一用 Python，已移除 Node.js memory-v2（2026-03-05 退役）
@@ -98,3 +106,4 @@
 - 2026-03-09: [固] 三級注入策略（Level 0/1/2）+ 人性化 Trigger + 工作單元命名 + 自我迭代原則
 - 2026-03-09: [固] 定期檢閱週期（每 5±2 session）— 近期 session 回顧、重複模式收攏晉升、向量庫同步
 - 2026-03-10: [固] 自我迭代理論背書 — 8 條原則 × 五大領域跨學科理論（Skinner/Kolmogorov/Popper/Taleb/Dreyfus/Aristotle/Rawls/Russell 等）
+- 2026-03-10: [固] V2.6 Self-Iteration Engine 實作 — metrics 收集 + 震盪偵測 + 成熟度模型 + 定期檢閱觸發 + CLAUDE.md 行為指引 + SPEC v2.6

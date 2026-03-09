@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 偏好, 風格, 習慣, style, preference, 語言, 回應
-- Last-used: 2026-03-05
-- Confirmations: 10
+- Last-used: 2026-03-10
+- Confirmations: 44
 - Type: preference
 
 ## 知識

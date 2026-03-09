@@ -4,6 +4,7 @@
 - Confidence: [固]
 - Source: 2026-03-05 V2.3 升級全面掃描
 - Last-used: 2026-03-05
+- Confirmations: 3
 - Trigger: OpenClaw 架構, 運作流程, Gateway 管線, preprocessor 管線, 演算法, 降級, Token 流向, 服務拓撲, 系統概覽
 - Privacy: public
 
@@ -44,7 +45,7 @@
 | A13 | changelog-rotator | 確定性 | CHANGELOG 滾動：>8筆→移至 ARCHIVE |
 | A14 | index.js | 編排 | heartbeat 編排，呼叫所有模組+產報表 |
 | A15 | intent-classifier | 混合 | Gate 分類：確定性快篩+qwen3:1.7b 五大分類 |
-| A16 | vector-indexer | 混合 | LanceDB 向量搜尋：qwen3-embedding:0.6b, 1024維 |
+| A16 | vector-indexer | 混合 | LanceDB 向量搜尋：qwen3-embedding:0.6b, 1024維, hybrid keyword boost (+0.1), self-healing cache |
 | A17 | fusion-ranker | 確定性 | 融合：0.5×A4+0.5×vector+confidence+category |
 | A18 | taxonomy.js | 確定性 | 分類載入+noMemory快篩+categoryAlignment |
 | A20 | behavioral-observer | 確定性 | 每訊息特徵提取：字數/句長/問句比/指令比/emoji |
@@ -54,12 +55,16 @@
 | — | atom-parser | 確定性 | .md metadata 解析（title/confidence/trigger/features） |
 | — | report-writer | 確定性 | 彙整報表：decay/staging/candidate/system-health |
 
-### 雙 Hook 記憶注入
+### 三 Hook 記憶管線
 
-| Hook | 事件 | 策略 | 頻率 |
-|------|------|------|------|
-| atom-context-injector | agent:bootstrap | WHO（身份驅動） | 每 session 一次 |
-| memory-retriever | message:before | WHAT（內容驅動） | 每訊息 |
+| Hook | 事件 | 方向 | 策略 | 頻率 |
+|------|------|------|------|------|
+| atom-context-injector | agent:bootstrap | Read | WHO（身份驅動） | 每 session 一次 |
+| memory-retriever | message:before | Read | WHAT（內容驅動） | 每訊息 |
+| memory-writer | message:sent | Write | 回應萃取（確定性） | 每回覆 |
+
+memory-writer 為安全網：偵測記憶信號但 agent 未自行 fs_write 時，自動建 staging entry。
+agent 也可透過 fs_write 直接寫入 atoms/（由 SKILL.md Memory Write Protocol 指導）。
 
 ### 降級鏈（永不中斷服務）
 

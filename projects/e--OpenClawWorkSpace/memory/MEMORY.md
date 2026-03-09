@@ -15,11 +15,13 @@
 | gateway-controlui-routing | memory/gateway-controlui-routing.md | controlUi 路由, Dashboard Not Found, 405, SPA catch-all, basePath, 升級 2026.3.2, LINE webhook 404 |
 | gateway-chat-send-routing | memory/gateway-chat-send-routing.md | chat.send, LINE 推送, cross-context messaging, session routing, deliverOutboundPayloads, OriginatingChannel |
 | consciousness-stream | memory/consciousness-stream.md | 識流, 意識流, 透過識流, 八識, 轉識成智, 高風險任務, 跨系統任務 |
+| memory-writer-investigation | memory/memory-writer-investigation.md | memory-writer, hook 不觸發, message:before, message:sent, message:preprocessed, staging, internal hook |
 | openclaw-architecture | memory/openclaw-architecture.md | OpenClaw 架構, 運作流程, Gateway 管線, preprocessor 管線, 演算法, 降級, 服務拓撲 |
 | openclaw-setup-guide | memory/openclaw-setup-guide.md | 安裝 OpenClaw, 啟動 Gateway, 環境設定, 首次設定, 重新部署, 服務啟停, start-gateway |
 | openclaw-taxonomy | memory/openclaw-taxonomy.md | 人事時地物, 五大分類, taxonomy, 分類系統, categories.json, 子分類, atomPaths |
 | openclaw-self-iteration | memory/openclaw-self-iteration.md | 升級 OpenClaw, 版本管理, config merge, plugin 管理, 自我除錯, 迭代, 維護 |
 | openclaw-latest-issues | memory/openclaw-latest-issues.md | OpenClaw 官方文件, 最新版本, breaking changes, 升級問題, 已知問題, 故障排除, openclaw doctor, release notes |
+| gateway-internal-hooks | memory/gateway-internal-hooks.md | internal hook, registerInternalHook, triggerInternalHook, HOOK.md, HookRunner, bundled hooks, gateway:startup, agent:bootstrap, message:sent, message:received, message:preprocessed, hook 載入, workspace hook 開發 |
 
 ---
 

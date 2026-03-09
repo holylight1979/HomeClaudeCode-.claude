@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-03-04 holylight — OpenClaw 2026.3.1 source code + GitHub issues + docs
-- Last-used: 2026-03-04
+- Last-used: 2026-03-06
+- Confirmations: 4
 - Trigger: controlUi 路由衝突、Dashboard Not Found、405、SPA catch-all、basePath、升級 2026.3.2、LINE webhook 404、controlUi basePath
 - Privacy: public
 

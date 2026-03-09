@@ -3,8 +3,8 @@
 - Scope: project
 - Confidence: [觀]
 - Source: 2026-03-05 官方文件 docs.openclaw.ai + GitHub releases 掃描
-- Last-used: 2026-03-05
-- Confirmations: 0
+- Last-used: 2026-03-06
+- Confirmations: 3
 - Type: reference
 - Tags: openclaw, 官方文件, 版本, issues, troubleshooting
 - Trigger: OpenClaw 官方文件, 最新版本, breaking changes, 升級問題, 已知問題, 故障排除, openclaw doctor, 版本差異, release notes

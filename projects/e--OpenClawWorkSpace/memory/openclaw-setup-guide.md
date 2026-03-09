@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-03-05 V2.3 升級全面掃描
-- Last-used: 2026-03-05
+- Last-used: 2026-03-06
+- Confirmations: 7
 - Trigger: 安裝 OpenClaw, 啟動 Gateway, 啟動服務, 環境設定, 首次設定, 重新部署, 服務啟停, start-gateway, OpenClawPanel
 - Privacy: public
 

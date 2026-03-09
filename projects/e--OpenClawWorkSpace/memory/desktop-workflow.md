@@ -3,7 +3,8 @@
 - Scope: Claude Code 桌面操作通用
 - Confidence: [觀]
 - Source: 2026-02-28 holylight — LINE 監測任務實戰歸納
-- Last-used: 2026-02-28
+- Last-used: 2026-03-05
+- Confirmations: 1
 - Trigger: 需要操作畫面、切換視窗、監測其他 session、GUI 自動化任務
 - Privacy: 無敏感資料
 

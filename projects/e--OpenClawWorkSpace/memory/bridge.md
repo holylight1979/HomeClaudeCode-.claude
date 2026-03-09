@@ -3,7 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-02-27 holylight — Bridge 完整整合（server + plugins + MCP + hooks）
-- Last-used: 2026-02-27
+- Last-used: 2026-03-06
+- Confirmations: 9
 - Trigger: 涉及 Bridge 服務、computer-use、Claude Code 整合、LINE→Claude 操作、port 3847、inbox、to-claude、to-openclaw
 - Privacy: public
 

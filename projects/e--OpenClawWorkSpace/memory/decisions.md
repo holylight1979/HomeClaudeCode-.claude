@@ -81,6 +81,50 @@
 - OpenClaw 可透過 inbox.jsonl 向 Claude Code 發送任務
 - 無法從 LINE 端直接確認 Claude Code 執行狀態
 
+### Gateway 記憶寫入（Phase 2, 2026-03-05）
+- 方案選擇：混合式 C — hook 自動萃取 + skill 指導手動寫入
+- memory-writer hook (message:sent)：確定性模式匹配，零 LLM 呼叫，零延遲
+- SKILL.md Memory Write Protocol：教 agent 用 fs_write 寫入 atoms/staging
+- staging → A7 staging-evaluator：occ≥3 自動晉升，>14d 未晉升自動刪除
+- agent 有 fs_write 工具（tools.profile: "full" + fs.workspaceOnly: true）
+- 之前寫入失敗原因：缺機制（非權限問題）
+
+### Phase 3: 整合與已知限制（2026-03-05）
+- `message:sent` 事件在 v2026.3.2 不會對 Discord channel agent 回應觸發 — 平台限制
+- 替代方案：SKILL.md 廢棄 `memory/YYYY-MM-DD.md` 路徑 + memory-bridge.js preprocessor 掃描轉換
+- memory-bridge.js 掃描 `memory/` 和 `.openclaw/workspace/memory/` 舊日誌，轉為 staging entries（首次執行：402 掃描 → 295 建立）
+- Agent 仍會透過 edit tool 寫入 `memory/YYYY-MM-DD.md`（GPT 模型不一定遵循 SKILL.md），bridge 定期轉換作為補償
+- 三個 memory 目錄：`memory/`（agent 日誌）、`.openclaw/memory/`（內部 DB）、`.openclaw/workspace/memory/`（舊條目）
+- hook 安裝方式：`openclaw hooks install`（非 openclaw.json entries，那只控制 bundled hooks）
+- atom-context-injector + memory-retriever 於 2026-03-05 首次安裝（之前只有原始碼，從未生效）
+- Gateway 重啟後確認 7/7 hooks ready（含 atom-context-injector、memory-retriever、memory-writer）
+- 注入驗證已確認成功（2026-03-05 21:25）：agent 正確引用 identity-map 真名「煜閎」+ discord-output-policy 規則
+- 根因：`ctx.workspaceDir` 回傳專案根 `E:\OpenClawWorkSpace`，非 `.openclaw/workspace/`。修正為 `path.join(workspaceDir, ".openclaw", "workspace")`
+- `.openclaw/workspace/` 是獨立 git repo（有自己的 .git/），父 repo 無法追蹤其檔案
+- 跨頻道記憶限制：session 級指令（如「記住不喜歡繁體中文」）不跨頻道，需寫入 atom 才能跨頻道共享
+
+### Hook 架構理解（2026-03-05）
+- openclaw.json 的 `hooks` section 只控制 **bundled** hooks（openclaw-bundled 類型）
+- 自訂 hooks 必須用 `openclaw hooks install <path>` 安裝到 `~/.openclaw/hooks/`
+- `openclaw hooks list` 顯示所有已安裝 hooks 及狀態
+- hook events: `gateway:startup`, `agent:bootstrap`, `command:new/reset`, `message:before/sent`, `agent_end`
+- atom-context-injector (agent:bootstrap): 注入 identity map + person profile + global atoms 到 USER.md
+- memory-retriever (message:before): 雙通道檢索 (A4 trigger + vector search) + fusion ranking，注入匹配 atoms
+- memory-writer (agent_end + message:sent fallback): 確定性模式匹配萃取
+
+### Phase 6: 跨頻道記憶寫入修復（2026-03-05）
+- 根因 1: AGENTS.md line 91 指向 `memory/YYYY-MM-DD.md`，與 SKILL.md 矛盾 → agent 寫到錯誤位置
+- 根因 2: memory-writer hook 監聽 `message:sent`（v2026.3.2 不觸發）→ 安全網失效
+- 修復: AGENTS.md 改指向 `atoms/` + `staging/`，新增跨頻道寫入區塊含 fs_write 範例
+- 修復: memory-writer 改用 `agent_end` 事件（保留 `message:sent` fallback）
+- Extension API 只有 `api.registerTool()`，不支援 `api.registerHook()`（hook 必須在 workspace/hooks/ 實作）
+- `preferences/` facet 未標準化，偏好寫入 `principles/`（AI 應遵循的規則）或 `interests/`
+
+### vector-indexer Hybrid Search（2026-03-06）
+- A16 search() 加入 keyword boost：extractQueryKeywords() 提取中英文關鍵詞，向量結果同時命中時 +0.1
+- A16 search() 加入 self-healing：query 失敗 → resetConnection + retry，連續失敗計數器 ≥3 升級 error
+- 參考來源：OpenClaw 社群 chromadb-memory skill 的 hybrid search 設計
+
 ## 行動
 
 - 修改 OpenClaw 配置時：先讀本 atom 確認已有決策，避免重複踩坑
