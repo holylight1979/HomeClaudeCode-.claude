@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 全域決策, 工具, 工作流, workflow, guardian, hooks, MCP, 記憶系統
-- Last-used: 2026-03-06
-- Confirmations: 25
+- Last-used: 2026-03-09
+- Confirmations: 52
 - Type: decision
 
 ## 知識
@@ -42,6 +42,14 @@
 - [固] Vector DB: ChromaDB（i7-3770 不支援 AVX2，LanceDB 不適用）
 - [固] MCP 傳輸格式：JSONL，protocolVersion 2025-11-25
 
+### 主動續航（Session Continuity）
+- [固] **段落完成即存**：完成一個段落的動作（不論驗證是否通過）前，立即將進度寫入原子記憶
+- [固] **Token 上限預警存檔**：判斷 session 快碰觸 token 上限時，優先將當前工作狀態寫入 atom（任務名稱、進度、下一步、阻塞點）
+- [固] **重試追蹤**：反覆修正/重試的場景，記錄重試次數、每次調整的重點、成功/失敗原因
+- [固] **執行中項目清單**：以 atom 記錄「目前執行中的項目」，新 session 首次發話時主動檢查是否有未完成項目
+- [固] **跨 Session 接續**：不論跨越多少 session，透過原子記憶確保接續上下文完整。項目完成或確定中斷時，標記為已完成/已中斷
+- [固] **向量庫同步**：寫入/更新 atom 時，同步更新向量記憶庫（確保新 session 的語意搜尋能找到）
+
 ### 歷史決策
 - [固] 記憶檢索統一用 Python，已移除 Node.js memory-v2（2026-03-05 退役）
 - [固] Stop hook 只保留 Guardian 閘門，移除 Discord 通知
@@ -68,3 +76,4 @@
 - 2026-03-05: .gitignore 整理 — 只保留 OpenClaw project memory，排除 session-env/、.claude/
 - 2026-03-05: fix: workflow-guardian stdout/stderr 強制 UTF-8（Windows cp950 導致中文亂碼）
 - 2026-03-06: V2.5 Hybrid Search Keyword Boost（專有名詞召回率提升）+ Self-healing Collection Cache（ChromaDB 失效自動恢復）
+- 2026-03-09: [固] 主動續航（Session Continuity）— 段落完成即存、Token 上限預警存檔、重試追蹤、執行中項目清單、跨 Session 接續
