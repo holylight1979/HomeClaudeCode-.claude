@@ -1022,6 +1022,22 @@ def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
             "at": _now_iso(),
         })
         state["sync_pending"] = True
+
+        # V2.7: Check if this file was modified in a previous session
+        try:
+            qf = _check_output_quality(file_path, session_id, config)
+            if qf:
+                state.setdefault("quality_feedback", {}).setdefault(
+                    "rewritten_files", []
+                ).append(qf)
+                print(
+                    f"[v2.7] Quality feedback: {file_path} was also modified "
+                    f"in session {qf['original_session']}",
+                    file=sys.stderr,
+                )
+        except Exception as e:
+            print(f"[v2.7] Quality check error: {e}", file=sys.stderr)
+
         write_state(session_id, state)
 
         # Trigger incremental vector index if an atom file was modified
@@ -1718,6 +1734,24 @@ def _generate_episodic_atom(
         )
     for ki in summary["knowledge_items"]:
         knowledge_lines.append(f"- [{ki['classification'].strip('[]')}] {ki['content']}")
+    # V2.7: Record quality feedback (files rewritten from previous sessions)
+    qf_files = state.get("quality_feedback", {}).get("rewritten_files", [])
+    if qf_files:
+        # Deduplicate by path
+        seen = set()
+        unique_qf = []
+        for qf in qf_files:
+            p = qf.get("path", "").replace("\\", "/").lower()
+            if p not in seen:
+                seen.add(p)
+                unique_qf.append(qf)
+        knowledge_lines.append(
+            f"- [臨] 品質回饋: {len(unique_qf)} 個檔案與前 session 重疊修改"
+        )
+        for qf in unique_qf[:5]:  # Cap at 5 to avoid bloat
+            knowledge_lines.append(
+                f"  - {qf['path']} (前 session: {qf.get('original_session', '?')})"
+            )
 
     # Build 摘要 section (v2.2)
     desc = summary.get("session_description", "")
@@ -1783,6 +1817,66 @@ def _generate_episodic_atom(
 
     print(f"[episodic] Generated: {atom_path.name} (scope: {scope_label})", file=sys.stderr)
     return atom_name
+
+
+# ─── V2.7: Output Quality Feedback ───────────────────────────────────────────
+
+
+def _check_output_quality(
+    file_path: str, session_id: str, config: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Check if file_path was modified in a recent (different) session.
+
+    Scans recent state files for ended sessions. If the same file was
+    modified in a previous session, returns a quality feedback record.
+    Returns None if no match or if the file is a memory/plan file.
+    """
+    normalized = file_path.replace("\\", "/").lower()
+
+    # Skip memory atoms and plan files — they're expected to be updated often
+    if "/memory/" in normalized or "/plans/" in normalized:
+        return None
+
+    scan_count = config.get("quality_feedback", {}).get("scan_recent_sessions", 5)
+
+    try:
+        state_files = sorted(
+            WORKFLOW_DIR.glob("state-*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except Exception:
+        return None
+
+    for sf in state_files[:scan_count + 5]:  # scan extra to skip active sessions
+        sid = sf.stem.replace("state-", "")
+        if sid == session_id:
+            continue
+
+        try:
+            with sf.open(encoding="utf-8") as f:
+                prev = json.load(f)
+        except Exception:
+            continue
+
+        # Only check ended sessions
+        if not prev.get("ended_at"):
+            continue
+
+        prev_files = {
+            m.get("path", "").replace("\\", "/").lower()
+            for m in prev.get("modified_files", [])
+        }
+
+        if normalized in prev_files:
+            return {
+                "path": file_path,
+                "original_session": sid[:8],
+                "original_ended": prev.get("ended_at", ""),
+                "at": _now_iso(),
+            }
+
+    return None
 
 
 # ─── V2.6: Self-Iteration Engine ────────────────────────────────────────────

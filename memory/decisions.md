@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 全域決策, 工具, 工作流, workflow, guardian, hooks, MCP, 記憶系統
 - Last-used: 2026-03-10
-- Confirmations: 56
+- Confirmations: 57
 - Type: decision
 
 ## 知識
@@ -110,3 +110,4 @@
 - 2026-03-10: [固] 自我迭代理論背書 — 8 條原則 × 五大領域跨學科理論（Skinner/Kolmogorov/Popper/Taleb/Dreyfus/Aristotle/Rawls/Russell 等）
 - 2026-03-10: [固] V2.6 Self-Iteration Engine 實作 — metrics 收集 + 震盪偵測 + 成熟度模型 + 定期檢閱觸發 + CLAUDE.md 行為指引 + SPEC v2.6
 - 2026-03-10: [觀] 新增 failures.md（失敗模式+品質回饋）+ toolchain.md（工具鏈實戰記憶）— 強化「從錯誤學習」和「環境知識累積」
+- 2026-03-10: [觀] V2.7 Output Quality Feedback — PostToolUse 偵測跨 session 重寫檔案 + episodic atom 品質訊號段落
