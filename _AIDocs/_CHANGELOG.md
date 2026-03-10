@@ -6,6 +6,7 @@
 
 | 日期 | 變更 | 影響檔案 |
 |------|------|---------|
+| 2026-03-10 | Wisdom Engine V2.8 Phase 2：因果圖種子 3 edges（guardian/encoding, atoms/vector, CLAUDE.md/context）+ add_causal_edge() helper + guardian import 更新 + 反思校準狀態記錄 | wisdom_engine.py, workflow-guardian.py, causal_graph.json, DESIGN.md, decisions.md |
 | 2026-03-10 | SPEC v2.7 清理：移除 40+ 處版本標註（v2.1/Sprint N）、合併元資料表格（必要+可選統一）、版本紀錄壓縮（9→7 條）、版本號 v2.6→v2.7 | SPEC_Atomic_Memory_System.md |
 | 2026-03-10 | V2.7 全文件版本同步：CLAUDE.md 精簡 50%（289→144 行，移除 hook 實作細節與重複偏好）、README/Install-forAI/MEMORY.md/decisions.md 版本號更新至 V2.7、架構樹加入 failures.md + toolchain.md、Token 估算更新（~1,400-1,900 tokens） | CLAUDE.md, README.md, Install-forAI.md, MEMORY.md, decisions.md, _CHANGELOG.md |
 | 2026-03-05 | V2.4 環境掃描整理：Architecture.md + Project_File_Tree.md 更新到 V2.4（回應捕獲/跨 Session 鞏固/episodic 子資料夾）、SPEC 修正過時引用（LanceDB→ChromaDB, qwen3:4b→1.7b, min_score 0.65→0.45）、_INDEX.md 修正 hook 數量、全文件交叉比對一致性確認 | _AIDocs/*, SPEC, _INDEX.md |

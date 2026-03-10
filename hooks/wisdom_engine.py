@@ -85,6 +85,45 @@ def get_causal_warnings(touched_files: List[str], max_depth: int = 2) -> List[st
     return warnings[:3]
 
 
+def add_causal_edge(
+    edge_from: str,
+    edge_to: str,
+    relation: str = "coupled_via",
+    through: str = "",
+    evidence: str = "",
+    confidence: float = 0.7,
+) -> bool:
+    """Add a new edge to the causal graph. Returns True if added, False if duplicate."""
+    graph = _load_json(CAUSAL_GRAPH_PATH, {"nodes": {}, "edges": []})
+    edges = graph.get("edges", [])
+
+    # Dedup: skip if same from→to already exists
+    for edge in edges:
+        if edge.get("from") == edge_from and edge.get("to") == edge_to:
+            return False
+
+    # Auto-create nodes
+    nodes = graph.setdefault("nodes", {})
+    for n in (edge_from, edge_to):
+        if n not in nodes:
+            ntype = "file" if "." in n or "/" in n else "concept"
+            nodes[n] = {"type": ntype, "domain": "auto"}
+    if through and through not in nodes:
+        nodes[through] = {"type": "concept", "domain": "auto"}
+
+    edges.append({
+        "from": edge_from,
+        "to": edge_to,
+        "relation": relation,
+        "through": through,
+        "confidence": confidence,
+        "evidence": evidence or f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')} auto",
+    })
+    graph["edges"] = edges
+    _save_json(CAUSAL_GRAPH_PATH, graph)
+    return True
+
+
 def update_causal_confidence(edge_from: str, edge_to: str, hit: bool) -> None:
     """Bayesian update: hit → approach 1.0, miss → decay toward 0."""
     graph = _load_json(CAUSAL_GRAPH_PATH, {"nodes": {}, "edges": []})

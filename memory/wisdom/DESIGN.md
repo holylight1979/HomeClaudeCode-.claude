@@ -1,6 +1,6 @@
 # Wisdom Engine 設計文件（V2.8）
 
-- Status: ✅ 第一階段完成
+- Status: ✅ 第二階段完成
 - Created: 2026-03-10
 - Work-Unit: 智慧引擎 Wisdom Engine
 
@@ -232,5 +232,54 @@ def reflect(episodic_atoms, current_metrics):
 
 - 因果圖冷啟動：新專案無 edge，前幾 session 無效果 → 靜默即可
 - 情境權重初始值靠經驗猜，需 10+ session 校準
-- 反思引擎需 retry_count（目前無）→ 第一階段需新增
+- 反思引擎需 retry_count（目前無）→ ✅ 第一階段已新增 track_retry()
 - 三者皆漸進增強，無資料時零 token，不會比現在差
+
+---
+
+## 第二階段完成記錄（2026-03-10）
+
+### 因果圖種子資料（3 edges）
+
+從 episodic atoms + failures.md 萃取的真實 debug 歷史：
+
+| from | to | relation | through | confidence | 來源 |
+|------|-----|----------|---------|-----------|------|
+| workflow-guardian.py | hook_output | breaks_when | stdout_encoding | 0.85 | episodic-20260305-guardian |
+| atom_files | vector_index | depends_on | vector_sync | 0.80 | decisions atom 多次確認 |
+| CLAUDE.md | context_budget | coupled_via | token_count | 0.75 | V2.7 精簡實證 |
+
+### add_causal_edge() helper
+
+`wisdom_engine.py:88` — Claude debug 時可直接呼叫寫入新因果關係：
+- 自動 dedup（同 from→to 不重複）
+- 自動建立 nodes（依 `.` 判斷 file/concept）
+- 預設 confidence 0.7
+
+Guardian import 已更新：`add_causal_edge` + `update_causal_confidence` 皆可用。
+
+### 反思引擎校準狀態
+
+目前 reflection_metrics.json 僅 1 session 資料（single_file: 1/1 correct）。
+校準需 10+ sessions 累積，暫不調整 calibrated_weights。
+觀察指標：
+- `first_approach_accuracy` 各 bucket 需 total ≥ 3 才有統計意義
+- blind_spots 觸發門檻 <70% accuracy
+- 權重校準邏輯待第三階段（需 10+ sessions 數據）
+
+### 整合測試結果
+
+- ✅ `get_causal_warnings(['workflow-guardian.py'])` → 1 warning, 格式正確
+- ✅ `get_causal_warnings(['atom_files'])` → 1 warning
+- ✅ `get_causal_warnings(['CLAUDE.md'])` → 1 warning
+- ✅ `add_causal_edge()` 新增成功 + dedup 阻擋
+- ✅ `classify_situation()` quick→direct(零注入), arch→plan
+- ✅ 3 warnings 合計 ~110 tokens（單項 ~35 tokens，實際 1-2 項 ≤90）
+- ✅ wisdom_engine.py = 246 行（≤250 限制）
+
+### 下一步（第三階段）
+
+- [ ] 10+ session 數據累積後校準 calibrated_weights
+- [ ] over_engineering_rate 追蹤（需 PostToolUse 偵測使用者 revert/simplify）
+- [ ] silence_accuracy 追蹤（需比對注入 vs 使用者反應）
+- [ ] /resume Skill（Session 接續智慧化）

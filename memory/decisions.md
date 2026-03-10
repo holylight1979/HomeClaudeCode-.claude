@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 全域決策, 工具, 工作流, workflow, guardian, hooks, MCP, 記憶系統
 - Last-used: 2026-03-10
-- Confirmations: 66
+- Confirmations: 67
 - Type: decision
 
 ## 知識
@@ -83,15 +83,18 @@
 - [觀] **跨專案模式掃描**：定期檢閱時比較不同專案 episodic atoms，跨 2+ 專案共通模式收攏為全域知識
 - [固] **CLAUDE.md 精簡（V2.7）**：289→144 行（-50%），移除 hook 實作細節（雙 LLM 表格、Hybrid Search、回應捕獲、跨 Session 鞏固、三級注入策略）、移除與 preferences.md 重複的偏好段落、風險分級框架；保留 Claude 決策指令（三層分類、寫入時機、分類演進、同步流程、自我迭代 8 條）
 
-### ✅ 智慧引擎 Wisdom Engine（V2.8 第一階段完成）
+### ✅ 智慧引擎 Wisdom Engine（V2.8 第二階段完成）
 - [觀] 三力架構：因果圖（Causal Graph）+ 情境分類器（Situation Classifier）+ 反思引擎（Reflection Engine）
 - [觀] 核心原則：code 預運算判斷 → 只注入結論（≤90 tokens） vs 現行注入規則文字（~500 tokens）
-- [觀] 實作：wisdom_engine.py (207行) + 2 JSON (causal_graph/reflection_metrics) + guardian 4 hook 點
+- [觀] 實作：wisdom_engine.py (246行) + 2 JSON (causal_graph/reflection_metrics) + guardian 4 hook 點
 - [觀] 因果圖：有向加權圖 + BFS depth=2 + Bayesian confidence 更新（命中+0.1, 落空*0.95, <0.3 淘汰）
+- [觀] 因果圖種子：3 edges（guardian↔encoding, atoms↔vector, CLAUDE.md↔context），來自真實 debug 歷史
+- [觀] add_causal_edge() helper：Claude debug 時直接寫入因果關係（auto dedup + auto node creation）
 - [觀] 情境分類：加權評分函數（file_count*2 + feature*4 + arch*5 + quick*-4 + thorough*3）→ direct/confirm/plan，小任務零注入
 - [觀] 反思引擎：滑動窗口統計 first_approach_accuracy + over_engineering_rate + silence_accuracy → 盲點偵測（<70% 標記）
 - [觀] 冷啟動策略：無資料時靜默（零 token），漸進增強
 - [觀] PostToolUse retry_count 追蹤已實作（wisdom_retry_count in state）
+- [觀] 反思校準：需 10+ sessions 數據，目前僅 1 session，暫不調整權重
 - [臨] 依賴：/resume Skill 也列入待建（Session 接續智慧化）
 
 ### 歷史決策
@@ -116,3 +119,4 @@
 - 2026-03-10: [固] V2.6 Self-Iteration Engine（8 條演進原則 + 跨學科理論背書 + metrics/震盪/成熟度/檢閱自動化）
 - 2026-03-10: [觀] V2.7 記憶強化 — failures.md + toolchain.md + Output Quality Feedback（PostToolUse 跨 session 偵測）+ 跨專案模式掃描
 - 2026-03-10: [固] V2.7 CLAUDE.md 精簡 — 289→144 行（-50%），移除 hook 實作細節與重複偏好，保留 Claude 決策指令
+- 2026-03-10: [觀] V2.8 Phase 2 — 因果圖種子 3 edges + add_causal_edge() helper + guardian import 更新 + 反思校準待 10+ sessions

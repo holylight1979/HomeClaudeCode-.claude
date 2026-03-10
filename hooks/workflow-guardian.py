@@ -25,11 +25,13 @@ from typing import Any, Dict, List, Optional, Tuple
 # ─── V2.8: Wisdom Engine (lazy import, graceful fallback) ────────────────────
 try:
     from wisdom_engine import (
+        add_causal_edge,
         get_causal_warnings,
         classify_situation,
         get_reflection_summary,
         reflect as wisdom_reflect,
         track_retry as wisdom_track_retry,
+        update_causal_confidence,
     )
     WISDOM_AVAILABLE = True
 except ImportError:
