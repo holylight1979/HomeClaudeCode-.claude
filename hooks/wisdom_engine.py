@@ -60,7 +60,7 @@ def get_causal_warnings(touched_files: List[str], max_depth: int = 2) -> List[st
         if "/" in norm:
             touched_set.add(norm.rsplit("/", 1)[-1])
 
-    warnings, visited = [], set()
+    warnings, visited, warned_edges = [], set(), set()
     queue = [(f, 0) for f in touched_set]
     while queue:
         node, depth = queue.pop(0)
@@ -73,6 +73,10 @@ def get_causal_warnings(touched_files: List[str], max_depth: int = 2) -> List[st
             e_from = edge.get("from", "")
             if node == e_from or node in e_from or e_from in node:
                 target = edge.get("to", "")
+                edge_key = (e_from, target)
+                if edge_key in warned_edges:
+                    continue
+                warned_edges.add(edge_key)
                 through = edge.get("through", "")
                 evidence = edge.get("evidence", "")
                 hint = evidence or (f"via {through}" if through else "")
@@ -151,7 +155,7 @@ def classify_situation(prompt_analysis: Dict[str, Any]) -> Dict[str, str]:
     keywords = set(prompt_analysis.get("keywords", []))
     intent = prompt_analysis.get("intent", "")
 
-    file_count = prompt_analysis.get("estimated_files", 1)
+    file_count = min(prompt_analysis.get("estimated_files", 1), 5)
     score = (
         file_count * weights.get("file", 2.0)
         + (1 if intent == "feature" else 0) * weights.get("feature", 4.0)
@@ -160,9 +164,9 @@ def classify_situation(prompt_analysis: Dict[str, Any]) -> Dict[str, str]:
         + (1 if keywords & THOROUGH_KEYWORDS else 0) * weights.get("thorough", 3.0)
     )
 
-    if score <= 2:
+    if score <= 4:
         return {"approach": "direct", "inject": ""}
-    elif score <= 6:
+    elif score <= 10:
         return {"approach": "confirm", "inject": "[情境:確認] 跨檔修改，建議先列範圍"}
     else:
         return {"approach": "plan", "inject": "[情境:規劃] 架構級變更，建議 Plan Mode"}

@@ -155,7 +155,7 @@ memory/
 - Type: semantic
 - Trigger: kw1, kw2, kw3
 - Last-used: YYYY-MM-DD
-- Confirmations: 2
+- Confirmations: 3
 - Created: YYYY-MM-DD
 - Confirmations: N
 - TTL: 30d
