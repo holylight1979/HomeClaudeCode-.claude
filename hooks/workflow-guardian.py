@@ -140,6 +140,8 @@ def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
         },
         "phase": "init",
         "modified_files": [],
+        "accessed_files": [],
+        "vcs_queries": [],
         "knowledge_queue": [],
         "sync_pending": False,
         "stop_blocked_count": 0,
@@ -1201,7 +1203,7 @@ def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
     tool_input = input_data.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
 
-    if file_path:
+    if tool_name in ("Edit", "Write") and file_path:
         state.setdefault("modified_files", []).append({
             "path": file_path,
             "tool": tool_name,
@@ -1237,6 +1239,21 @@ def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         normalized = file_path.replace("\\", "/")
         if "/memory/" in normalized and normalized.endswith(".md"):
             _trigger_incremental_index(config)
+
+    elif tool_name == "Read" and file_path:
+        # V2.10: Read Tracking — deduplicate, keep first occurrence only
+        accessed = state.setdefault("accessed_files", [])
+        if not any(a["path"] == file_path for a in accessed):
+            accessed.append({"path": file_path, "at": _now_iso()})
+            write_state(session_id, state)
+
+    elif tool_name == "Bash":
+        # V2.10: VCS query capture (git log/blame/show/diff, svn log/blame/diff)
+        command = tool_input.get("command", "")
+        if re.search(r"\b(git\s+(log|blame|show|diff)|svn\s+(log|blame|diff))\b", command):
+            vcs = state.setdefault("vcs_queries", [])
+            vcs.append({"command": command[:200], "at": _now_iso()})
+            write_state(session_id, state)
 
     output_nothing()
 
@@ -1328,10 +1345,12 @@ def _should_generate_episodic(state: Dict[str, Any], config: Dict[str, Any]) -> 
         return False
 
     mod_count = len(state.get("modified_files", []))
+    read_count = len(state.get("accessed_files", []))
     kq_count = len(state.get("knowledge_queue", []))
     min_files = ep_cfg.get("min_files", 1)
 
-    if mod_count < min_files and kq_count == 0:
+    # V2.10: Pure-read sessions (≥5 files) also warrant episodic atoms
+    if mod_count < min_files and kq_count == 0 and read_count < 5:
         return False
 
     # Skip very short sessions (< 2 minutes)
@@ -1755,10 +1774,22 @@ def _build_episodic_summary(state: Dict[str, Any]) -> Dict[str, Any]:
 
     atoms_referenced = list(state.get("injected_atoms", []))
 
+    # V2.10: Read tracking
+    accessed = state.get("accessed_files", [])
+    accessed_areas: Counter = Counter()
+    for a in accessed:
+        area = _extract_area(a.get("path", ""))
+        accessed_areas[area] += 1
+
     # Topic tracker enrichment (v2.2)
     tracker = state.get("topic_tracker", {})
     intent_dist = tracker.get("intent_distribution", {})
     dominant_intent = max(intent_dist, key=intent_dist.get) if intent_dist else "general"
+
+    # V2.10: Use accessed areas as fallback for primary_area when no modifications
+    if not work_areas and accessed_areas:
+        acc_areas = [{"area": a, "count": c} for a, c in accessed_areas.most_common()]
+        primary_area = acc_areas[0]["area"] if acc_areas else "session-work"
 
     return {
         "work_areas": work_areas,
@@ -1772,6 +1803,10 @@ def _build_episodic_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "session_description": tracker.get("first_prompt_summary", ""),
         "keyword_topics": tracker.get("keyword_signals", []),
         "related_episodic": tracker.get("related_episodic", []),
+        "accessed_files": accessed,
+        "files_accessed": len(accessed),
+        "accessed_areas": [{"area": a, "count": c} for a, c in accessed_areas.most_common()],
+        "vcs_queries": state.get("vcs_queries", []),
     }
 
 
@@ -1854,6 +1889,26 @@ def _update_memory_index(memory_dir: Path, atom_name: str, triggers: list) -> No
     index_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _build_read_tracking_section(summary: Dict[str, Any]) -> str:
+    """Build '## 閱讀軌跡' section from accessed files and VCS queries (V2.10)."""
+    accessed = summary.get("accessed_files", [])
+    vcs = summary.get("vcs_queries", [])
+    if not accessed and not vcs:
+        return ""
+    lines = ["## 閱讀軌跡\n"]
+    for af in accessed[:30]:
+        lines.append(f"- {af['path']}")
+    if accessed:
+        lines.append("")
+    if vcs:
+        lines.append("### 版控查詢")
+        for v in vcs[:10]:
+            lines.append(f"- `{v['command']}`")
+        lines.append("")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _build_cross_session_section(state: Dict[str, Any]) -> str:
     """Build '## 跨 Session 觀察' section from cross-session observations."""
     obs = state.get("cross_session_observations", [])
@@ -1925,6 +1980,18 @@ def _generate_episodic_atom(
     for ki in summary["knowledge_items"]:
         knowledge_lines.append(f"- [{ki['classification'].strip('[]')}] {ki['content']}")
 
+    # V2.10: Read tracking summary
+    if summary.get("files_accessed", 0) > 0:
+        knowledge_lines.append(f"- [臨] 閱讀 {summary['files_accessed']} 個檔案")
+        if summary.get("accessed_areas"):
+            read_areas_str = ", ".join(
+                f"{ra['area']} ({ra['count']})" for ra in summary["accessed_areas"][:5]
+            )
+            knowledge_lines.append(f"- [臨] 閱讀區域: {read_areas_str}")
+    vcs = summary.get("vcs_queries", [])
+    if vcs:
+        knowledge_lines.append(f"- [臨] 版控查詢 {len(vcs)} 次")
+
     # Build 摘要 section (v2.2)
     desc = summary.get("session_description", "")
     dom_intent = summary.get("dominant_intent", "general")
@@ -1971,6 +2038,7 @@ def _generate_episodic_atom(
         + f"\n"
         f"\n"
         + (f"## 關聯\n\n" + "\n".join(relation_lines) + "\n\n" if relation_lines else "")
+        + _build_read_tracking_section(summary)
         + _build_cross_session_section(state)
         + f"## 行動\n"
         f"\n"
@@ -2077,6 +2145,16 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
             wisdom_reflect(state)
         except Exception as e:
             print(f"[v2.8] Wisdom reflect error: {e}", file=sys.stderr)
+
+    # V2.10: Staging area reminder
+    staging_dir = MEMORY_DIR / "_staging"
+    if staging_dir.exists():
+        staging_files = list(staging_dir.glob("*.md"))
+        if staging_files:
+            print(
+                f"[v2.10] _staging/ 有 {len(staging_files)} 個暫存檔案待清理",
+                file=sys.stderr,
+            )
 
     # v2.1 Task #2: Auto-generate episodic atom
     episodic_generated = False

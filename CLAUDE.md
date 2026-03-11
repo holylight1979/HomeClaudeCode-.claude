@@ -112,6 +112,10 @@ Hook 自動處理：embedding、向量搜尋、知識萃取、跨 session 鞏固
 2. **Token 上限預警**：快碰上限時優先存檔工作狀態（任務、進度、下一步、阻塞點）
 3. **重試追蹤**：反覆修正場景 → 記錄重試次數+調整+成敗原因，避免跨 session 重走錯路
 4. **自動續接**：`/resume` skill — 生成續接 prompt → MCP 自動化開新 VS Code 視窗 → 貼上 → 執行
+5. **暫存檔案管理**：
+   - 續接 prompt、臨時工作文件 → 存放 `memory/_staging/`，不放 memory 根目錄
+   - 清理信號：相關工作已確認寫入 atom + 上傳 git/svn → 刪除 `_staging/` 下對應檔案
+   - `_staging/` 已加入 .gitignore，不會被上傳
 
 ### 工作單元命名
 

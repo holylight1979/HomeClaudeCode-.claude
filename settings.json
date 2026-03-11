@@ -108,7 +108,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|Read|Bash",
         "hooks": [
           {
             "type": "command",

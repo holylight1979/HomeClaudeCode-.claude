@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 全域決策, 工具, 工作流, workflow, guardian, hooks, MCP, 記憶系統
 - Last-used: 2026-03-11
-- Confirmations: 30
+- Confirmations: 32
 - Type: decision
 
 ## 知識
@@ -67,6 +67,13 @@
 - [固] ACT-R Activation Scoring：`B_i = ln(Σ t_k^{-0.5})`，access.json 保留最近 50 筆，高分優先注入
 - [固] Blind-Spot Reporter：三重空判斷（matched + injected + alias 全空）→ 注入 `[Guardian:BlindSpot]`
 
+### Session 全軌跡追蹤（V2.10）
+- [固] Read Tracking：PostToolUse 攔截 Read tool，去重記錄 accessed_files（同檔只記首次）
+- [固] VCS Query Capture：PostToolUse 攔截 Bash tool，regex 匹配 git/svn log/blame/show/diff
+- [固] Episodic 閱讀軌跡：`_build_read_tracking_section()` 生成 `## 閱讀軌跡` section（最多 30 檔 + 10 筆版控查詢）
+- [固] 純閱讀 Session：accessed_files ≥ 5 且無修改時也生成 episodic atom
+- [固] 暫存區管理：`memory/_staging/` 存放續接 prompt 等臨時檔案，.gitignore 排除，SessionEnd 提醒清理
+
 ### 歷史決策
 - [固] 記憶檢索統一用 Python，已移除 Node.js memory-v2（2026-03-05 退役）
 - [固] Stop hook 只保留 Guardian 閘門，移除 Discord 通知
@@ -91,3 +98,4 @@
 - 2026-03-11: feat: V2.8 升級完成（3 sessions）— Wisdom Engine + 自我迭代 V2.6 + 品質回饋 V2.7 + Guardian 增量合併 + SPEC/文件全面更新
 - 2026-03-11: feat: V2.9 S2 — Related-Edge Spreading（多跳檢索 depth=1）+ ACT-R Activation Scoring（時間加權排序 + .access.json）
 - 2026-03-11: feat: V2.9 S3 完成 — 整合測試通過 + SPEC §十四 + 版號升級 V2.8→V2.9
+- 2026-03-11: feat: V2.10 — Session 全軌跡追蹤（Read Tracking + VCS Query Capture + 閱讀軌跡 section + 純閱讀 episodic + _staging 暫存區管理）
