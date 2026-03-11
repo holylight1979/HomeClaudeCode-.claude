@@ -1,4 +1,4 @@
-# Atomic Memory V2.8 — 安裝指南
+# Atomic Memory V2.9 — 安裝指南
 
 > **目標讀者**：使用 VS Code + Claude Code Extension，但完全不知道原子記憶是什麼的開發者。
 > 本指南會幫你把原子記憶系統**合併安裝**到你現有的 `~/.claude/` 目錄中。
@@ -93,6 +93,7 @@ cp /tmp/atomic-memory/CLAUDE.md ~/.claude/CLAUDE.md
 mkdir -p ~/.claude/hooks
 cp /tmp/atomic-memory/hooks/workflow-guardian.py ~/.claude/hooks/
 cp /tmp/atomic-memory/hooks/extract-worker.py ~/.claude/hooks/
+cp /tmp/atomic-memory/hooks/wisdom_engine.py ~/.claude/hooks/
 
 # ── 工具鏈 ──
 mkdir -p ~/.claude/tools/memory-vector-service
@@ -224,7 +225,7 @@ cat > ~/.claude/memory/MEMORY.md << 'EOF'
 
 ## 高頻事實
 
-- 原子記憶 V2.5
+- 原子記憶 V2.9
 EOF
 ```
 
@@ -369,7 +370,8 @@ python ~/.claude/tools/memory-audit.py
 │
 ├── hooks/                        ★
 │   ├── workflow-guardian.py       ★ 統一 Hook 入口
-│   └── extract-worker.py         ★ 非同步知識萃取 worker
+│   ├── extract-worker.py         ★ 非同步知識萃取 worker
+│   └── wisdom_engine.py          ★ Wisdom Engine (V2.8+)
 │
 ├── tools/                        ★
 │   ├── memory-audit.py           ★ 健檢工具
