@@ -1,0 +1,37 @@
+{
+  "window_size": 10,
+  "metrics": {
+    "first_approach_accuracy": {
+      "single_file": {
+        "correct": 8,
+        "total": 8
+      },
+      "multi_file": {
+        "correct": 0,
+        "total": 0
+      },
+      "architecture": {
+        "correct": 0,
+        "total": 0
+      }
+    },
+    "over_engineering_rate": {
+      "user_reverted_or_simplified": 0,
+      "total_suggestions": 0
+    },
+    "silence_accuracy": {
+      "held_back_and_user_didnt_ask": 0,
+      "held_back_but_user_needed": 0,
+      "spoke_but_user_ignored": 0
+    }
+  },
+  "calibrated_weights": {
+    "file": 2.0,
+    "feature": 4.0,
+    "arch": 5.0,
+    "quick": -4.0,
+    "thorough": 3.0
+  },
+  "blind_spots": [],
+  "last_reflection": "2026-03-10T17:30:24.042219+00:00"
+}
