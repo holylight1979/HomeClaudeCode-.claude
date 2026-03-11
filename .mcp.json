@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "MCPControl": {
+      "command": "C:\\Program Files\\nodejs\\npx.cmd",
+      "args": ["-y", "computer-use-mcp"]
+    }
+  }
+}

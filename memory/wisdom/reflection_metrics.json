@@ -3,16 +3,16 @@
   "metrics": {
     "first_approach_accuracy": {
       "single_file": {
-        "correct": 11,
-        "total": 11
+        "correct": 14,
+        "total": 14
       },
       "multi_file": {
         "correct": 1,
-        "total": 1
+        "total": 2
       },
       "architecture": {
         "correct": 0,
-        "total": 2
+        "total": 3
       }
     },
     "over_engineering_rate": {
@@ -32,6 +32,8 @@
     "quick": -4.0,
     "thorough": 3.0
   },
-  "blind_spots": [],
-  "last_reflection": "2026-03-11T05:59:06.637855+00:00"
+  "blind_spots": [
+    "architecture 首次正確率 0%"
+  ],
+  "last_reflection": "2026-03-11T06:47:42.434326+00:00"
 }

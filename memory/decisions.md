@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 全域決策, 工具, 工作流, workflow, guardian, hooks, MCP, 記憶系統
 - Last-used: 2026-03-11
-- Confirmations: 26
+- Confirmations: 28
 - Type: decision
 
 ## 知識
@@ -83,3 +83,4 @@
 - 2026-03-06: fix: V2.4 萃取改用 detached subprocess（extract-worker.py），解決 sys.exit + hook 3s timeout 雙殺問題，萃取首次成功
 - 2026-03-06: feat: V2.5 寫入品質強化 — 萃取 prompt 重寫（可操作性標準）、6 知識類型、150 chars 上限、format:json、Write Gate 可操作性評分、CJK patterns
 - 2026-03-11: feat: V2.8 升級完成（3 sessions）— Wisdom Engine + 自我迭代 V2.6 + 品質回饋 V2.7 + Guardian 增量合併 + SPEC/文件全面更新
+- 2026-03-11: feat: V2.9 S2 — Related-Edge Spreading（多跳檢索 depth=1）+ ACT-R Activation Scoring（時間加權排序 + .access.json）

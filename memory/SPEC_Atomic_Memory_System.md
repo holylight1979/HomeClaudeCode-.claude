@@ -160,7 +160,7 @@ memory/
 - Type: semantic                 ← v2.1（semantic/episodic/procedural，預設 semantic）
 - Trigger: kw1, kw2, kw3
 - Last-used: YYYY-MM-DD
-- Confirmations: 3
+- Confirmations: 4
 - Created: YYYY-MM-DD            ← v2.1（首次建立日期）
 - TTL: 30d                       ← v2.1（可選，null = 由 confidence 決定）
 - Expires-at: YYYY-MM-DD         ← v2.1（可選，自動計算）

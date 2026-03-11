@@ -12,9 +12,11 @@ Requirements: Python 3.8+, zero external dependencies.
 """
 
 import json
+import math
 import os
 import sys
 import re
+import time
 import threading
 import urllib.request
 import urllib.error
@@ -210,6 +212,71 @@ def parse_project_aliases(memory_dir: Path) -> List[str]:
     if not m:
         return []
     return [a.strip().lower() for a in m.group(1).split(",") if a.strip()]
+
+
+def _find_atom_path(name: str, all_atoms: List[Tuple[AtomEntry, Path]]) -> Optional[Path]:
+    """Find the file path for a named atom from the all_atoms list."""
+    for (aname, rel_path, _triggers), base_dir in all_atoms:
+        if aname == name:
+            return (base_dir / rel_path) if rel_path else (base_dir / "memory" / f"{name}.md")
+    return None
+
+
+def spread_related(
+    matched_names: set,
+    all_atoms: List[Tuple[AtomEntry, Path]],
+    already_injected: List[str],
+    max_depth: int = 1,
+) -> List[Tuple[AtomEntry, Path]]:
+    """沿 Related 邊擴散，回傳尚未匹配的相關 atoms (depth-limited BFS)."""
+    _RELATED_RE = re.compile(r"^- Related:\s*(.+)", re.MULTILINE)
+    visited = set(matched_names) | set(already_injected)
+    wave = list(matched_names)
+    result: List[Tuple[AtomEntry, Path]] = []
+
+    for _depth in range(max_depth):
+        next_wave: List[str] = []
+        for name in wave:
+            atom_path = _find_atom_path(name, all_atoms)
+            if not atom_path or not atom_path.exists():
+                continue
+            try:
+                text = atom_path.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError):
+                continue
+            rm = _RELATED_RE.search(text)
+            if not rm:
+                continue
+            for rn in (r.strip() for r in rm.group(1).split(",") if r.strip()):
+                if rn not in visited:
+                    visited.add(rn)
+                    for entry_tuple in all_atoms:
+                        if entry_tuple[0][0] == rn:
+                            result.append(entry_tuple)
+                            next_wave.append(rn)
+                            break
+        wave = next_wave
+    return result
+
+
+def compute_activation(atom_name: str, atom_dir: Path) -> float:
+    """ACT-R base-level activation: B_i = ln(Σ t_k^{-0.5})."""
+    access_file = atom_dir / f"{atom_name}.access.json"
+    if not access_file.exists():
+        return -10.0
+    try:
+        data = json.loads(access_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return -10.0
+    timestamps = data.get("timestamps", [])
+    if not timestamps:
+        return -10.0
+    now = time.time()
+    total = 0.0
+    for ts in timestamps:
+        t_k = max(now - ts, 1.0)
+        total += t_k ** -0.5
+    return math.log(total) if total > 0 else -10.0
 
 
 def cwd_to_project_slug(cwd: str) -> str:
@@ -895,6 +962,15 @@ def handle_user_prompt_submit(
             if entry[0][0] not in superseded_names
         ]
 
+    # ── ACT-R Activation Sorting (v2.9) ─────────────────────────
+    # Sort matched atoms by time-weighted activation score (high → low)
+    def _activation_key(entry):
+        (name, rel_path, _triggers), base_dir = entry
+        atom_dir = (base_dir / rel_path).parent if rel_path else (base_dir / "memory")
+        return compute_activation(name, atom_dir)
+
+    matched_with_dir.sort(key=_activation_key, reverse=True)
+
     # Load atoms within budget
     newly_injected: List[str] = []
     if matched_with_dir:
@@ -923,35 +999,30 @@ def handle_user_prompt_submit(
                 newly_injected.append(name)
                 break
 
-        # ── Related atom auto-loading (v2.1 Sprint 2) ─────────────
-        RELATED_RE = re.compile(r"^- Related:\s*(.+)", re.MULTILINE)
-        for (name, rel_path, triggers), base_dir in list(matched_with_dir):
-            atom_path = (base_dir / rel_path) if rel_path else (base_dir / "memory" / f"{name}.md")
-            if not atom_path.exists():
+        # ── Related-Edge Spreading (v2.9) ─────────────────────────
+        related_entries = spread_related(
+            set(newly_injected), all_atoms, already_injected, max_depth=1,
+        )
+        for (rname, rel_path, _triggers), base_dir in related_entries:
+            if rname in newly_injected:
+                continue
+            rpath = (base_dir / rel_path) if rel_path else (base_dir / "memory" / f"{rname}.md")
+            if not rpath.exists():
                 continue
             try:
-                atom_text = atom_path.read_text(encoding="utf-8-sig")
+                content = rpath.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeDecodeError):
                 continue
-            rm = RELATED_RE.search(atom_text)
-            if not rm:
-                continue
-            related_names = [r.strip() for r in rm.group(1).split(",") if r.strip()]
-            for rn in related_names:
-                if rn in already_injected or rn in newly_injected:
-                    continue
-                # Find related atom in all_atoms
-                for (aname, arel, atrig), abase in all_atoms:
-                    if aname == rn:
-                        rpath = (abase / arel) if arel else (abase / "memory" / f"{rn}.md")
-                        if rpath.exists():
-                            try:
-                                first_line = rpath.read_text(encoding="utf-8-sig").split("\n", 1)[0].strip("# ").strip()
-                            except (OSError, UnicodeDecodeError):
-                                break
-                            atom_lines.append(f"[Atom:{rn}] (related\u2192{name}) {first_line}")
-                            newly_injected.append(rn)
-                        break
+            content_tokens = len(content) // 4
+            if used_tokens + content_tokens <= budget:
+                atom_lines.append(f"[Atom:{rname}] (related)\n{content}")
+                newly_injected.append(rname)
+                used_tokens += content_tokens
+            else:
+                first_line = content.split("\n", 1)[0].strip("# ").strip()
+                atom_lines.append(f"[Atom:{rname}] (related) {first_line} (full: Read {rel_path or rname + '.md'})")
+                newly_injected.append(rname)
+                break
 
         if atom_lines:
             lines.append("[Guardian:Memory] Trigger-matched atoms loaded:")
@@ -999,6 +1070,18 @@ def handle_user_prompt_submit(
                             changed = True
                         if changed:
                             apath.write_text(text, encoding="utf-8")
+                        # ACT-R access log (v2.9)
+                        try:
+                            access_file = apath.parent / f"{name}.access.json"
+                            if access_file.exists():
+                                adata = json.loads(access_file.read_text(encoding="utf-8"))
+                            else:
+                                adata = {"timestamps": []}
+                            adata["timestamps"].append(time.time())
+                            adata["timestamps"] = adata["timestamps"][-50:]
+                            access_file.write_text(json.dumps(adata), encoding="utf-8")
+                        except (OSError, json.JSONDecodeError):
+                            pass
                         # Promotion logic (v2.2) — auto-promote [臨]→[觀], hint [觀]→[固]
                         if new_count is not None:
                             conf_m = confidence_re.search(text)
