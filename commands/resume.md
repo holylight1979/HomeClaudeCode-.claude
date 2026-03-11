@@ -1,6 +1,37 @@
 # /resume — 自動續接 Session
 
-你即將執行「自動續接」流程：生成下一階段的續接 prompt，然後在 VS Code 開啟新的 Claude Code session 並自動貼上執行。
+> 生成續接 prompt，在 VS Code 開啟新 Claude Code session 並自動貼上執行。
+> 全域 Skill，適用任何專案。
+
+---
+
+## 使用方式
+
+```
+/resume [下一步指示]
+```
+
+### 參數
+
+| 參數 | 必填 | 說明 | 範例 |
+|------|------|------|------|
+| 下一步指示 | 否 | 明確指定新 session 要做什麼（省略則自動從 todo/git/atoms 推斷） | `繼續實作 PackHandler 的 try-catch` |
+
+### 使用範例
+
+```
+/resume
+/resume 繼續實作 PackHandler 的 try-catch
+/resume 接續上次的 UI 重構，從 HeroPanel 開始
+```
+
+### 錯誤處理
+
+- **MCP 不可用**（無 MCPControl）→ 改為手動模式：生成 prompt 並複製到剪貼簿，提示使用者手動開新 session 貼上
+- **新視窗開啟失敗** → 同上手動模式 fallback
+- **無任何進行中工作** → 提示「找不到未完成的工作，請指定下一步」
+
+---
 
 ## 輸入
 

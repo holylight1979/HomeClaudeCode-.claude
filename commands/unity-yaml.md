@@ -7,7 +7,30 @@
 
 ## 使用方式
 
-使用者呼叫 `/unity-yaml` 時，根據使用者的指令判斷操作類型並執行。
+```
+/unity-yaml <操作描述>
+```
+
+### 參數
+
+| 參數 | 必填 | 說明 | 範例 |
+|------|------|------|------|
+| 操作描述 | 是 | 要執行的操作（自然語言） | `解析 MapData.asset 的結構` |
+
+### 使用範例
+
+```
+/unity-yaml 解析 MapData.asset 的結構
+/unity-yaml 生成一個新的 ScriptableObject asset
+/unity-yaml 修改 MapData.asset 的 ChunkSize 為 150
+/unity-yaml 從 MapData_001.asset 模板複製一份 MapData_003.asset
+```
+
+### 錯誤處理
+
+- **未帶操作描述** → 顯示本使用說明（含操作類型列表），結束
+- **操作類型不明確** → 詢問使用者要做哪種操作
+- **檔案路徑不存在** → 提示路徑不存在
 
 工具位置：`~/.claude/tools/unity-yaml-tool.py`
 
