@@ -6,7 +6,7 @@
 - Trigger: V3, 研究, 認知科學, 佛學, 唯識, ACT-R, spreading activation
 - Last-used: 2026-03-11
 - Created: 2026-03-11
-- Confirmations: 0
+- Confirmations: 1
 - Tags: research, theory, v3-design
 - Related: decisions, v3-design-spec
 
@@ -84,8 +84,25 @@ Score = α×cos_sim + β×BM25 + γ×graph_proximity
 - 三軸融合比任何單一方法都好
 - 現有系統：keyword + vector 雙軸，V3 加 graph proximity（Related edges）= 三軸
 
+## 未來方向
+
+### 閱讀 Session 模式（V2.11+ 候選）
+
+使用者需求：開專門的「閱讀 session」讓 AI 大量閱讀專案文件，產出結構化知識，長期保存供未來工具開發（如「綜合文件入口」網頁）。
+
+現狀（V2.10）：
+- Read Tracking 記錄閱讀路徑 → episodic atom（TTL 24d）
+- extract-worker 用 qwen3:1.7b 萃取知識（品質有限）
+- 需要 Claude 手動寫 semantic atom 才能長期保存深度摘要
+
+可能的實作方向：
+- 「閱讀模式」flag：session 結束時 Claude 自動把分析整理成 semantic atom（非 episodic）
+- 閱讀完成時自動產出結構化索引（類似 `_AIDocs/_INDEX.md` 但覆蓋更廣）
+- 可指定目標 atom：「這次閱讀的知識存到 doc-inventory atom」
+
 ## 演化日誌
 
 | 日期 | 變更 | 來源 |
 |------|------|------|
 | 2026-03-11 | 建立，三領域研究完成 | session:V3 設計討論 |
+| 2026-03-11 | +閱讀 Session 模式構想 | session:V2.10 討論 |
