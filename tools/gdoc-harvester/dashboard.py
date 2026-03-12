@@ -114,6 +114,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
   .stat-card .num.docs { color: #4ecca3; }
   .stat-card .num.sheets { color: #4e9fcc; }
   .stat-card .num.slides { color: #cc9f4e; }
+  .stat-card .num.pages { color: #9f4ecc; }
   .stat-card .num.err { color: #e94560; }
   .stat-card .label { font-size: 0.8em; color: #888; margin-top: 3px; }
   .file-list { margin-top: 15px; }
@@ -140,6 +141,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
   .type-badge.doc { background: #4ecca322; color: #4ecca3; }
   .type-badge.sheet { background: #4e9fcc22; color: #4e9fcc; }
   .type-badge.slide { background: #cc9f4e22; color: #cc9f4e; }
+  .type-badge.gitlab { background: #fc6d2622; color: #fc6d26; }
+  .type-badge.github { background: #f0f6fc22; color: #8b949e; }
+  .type-badge.page { background: #9f4ecc22; color: #9f4ecc; }
   .empty-state { text-align: center; padding: 60px 20px; color: #555; }
   .empty-state .icon { font-size: 3em; margin-bottom: 10px; }
   .empty-state p { font-size: 0.95em; }
@@ -163,13 +167,14 @@ async function update() {
     const [sr, fr] = await Promise.all([fetch('/api/status'), fetch('/api/files')]);
     const s = await sr.json();
     const files = await fr.json();
-    const total = (s.stats?.docs ?? 0) + (s.stats?.sheets ?? 0);
+    const total = (s.stats?.docs ?? 0) + (s.stats?.sheets ?? 0) + (s.stats?.slides ?? 0) + (s.stats?.pages ?? 0);
 
     // Stats
     document.getElementById('stats').innerHTML = `
       <div class="stat-card"><div class="num docs">${s.stats?.docs ?? 0}</div><div class="label">Docs</div></div>
       <div class="stat-card"><div class="num sheets">${s.stats?.sheets ?? 0}</div><div class="label">Sheets</div></div>
       <div class="stat-card"><div class="num slides">${s.stats?.slides ?? 0}</div><div class="label">Slides</div></div>
+      <div class="stat-card"><div class="num pages">${s.stats?.pages ?? 0}</div><div class="label">Pages</div></div>
       <div class="stat-card"><div class="num">${s.stats?.links_found ?? 0}</div><div class="label">連結追蹤</div></div>
       <div class="stat-card"><div class="num err">${s.stats?.errors ?? 0}</div><div class="label">錯誤</div></div>
     `;
@@ -180,7 +185,7 @@ async function update() {
       latestTitle = files[0].title;
       statusEl.innerHTML = '正在監聽... 最新收割：<span class="latest">《' + latestTitle + '》</span>';
     } else if (files.length === 0) {
-      statusEl.textContent = '正在監聽... 瀏覽 Google Docs/Sheets 即自動收割';
+      statusEl.textContent = '正在監聽... 瀏覽任何網頁即自動收割';
     }
     prevCount = files.length;
 
@@ -190,19 +195,24 @@ async function update() {
       fileList.innerHTML = `
         <div class="empty-state">
           <div class="icon">📡</div>
-          <p>等待收割... 請在其他分頁瀏覽 Google Docs 或 Sheets</p>
+          <p>等待收割... 請在其他分頁瀏覽任何網頁（Google Docs、GitLab、GitHub 等）</p>
         </div>`;
     } else {
       fileList.innerHTML = files.map((f, i) => {
-        const isSheet = f.type?.includes('sheet');
-        const isSlide = f.type?.includes('slide');
-        const typeBadge = isSlide
-          ? '<span class="type-badge slide">Slide</span>'
-          : isSheet
+        const t = f.type || '';
+        const typeBadge = t.includes('sheet')
           ? '<span class="type-badge sheet">Sheet</span>'
+          : t.includes('slide')
+          ? '<span class="type-badge slide">Slide</span>'
+          : t.includes('gitlab')
+          ? '<span class="type-badge gitlab">GitLab</span>'
+          : t.includes('github')
+          ? '<span class="type-badge github">GitHub</span>'
+          : (t === 'page' || t === 'web-page')
+          ? '<span class="type-badge page">Page</span>'
           : '<span class="type-badge doc">Doc</span>';
         const sizeKB = (f.size / 1024).toFixed(1);
-        const shortSource = f.source ? f.source.split('/d/')[1]?.substring(0, 8) || '' : '';
+        const shortSource = f.source ? (f.source.split('/d/')[1]?.substring(0, 8) || new URL(f.source).hostname || '') : '';
         return `
           <div class="file-card">
             <div class="file-num">${i + 1}</div>

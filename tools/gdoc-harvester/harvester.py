@@ -1,15 +1,15 @@
 """
-Google Docs/Sheets/Slides Harvester — 邊瀏覽邊收割
+Web Harvester — 邊瀏覽邊收割
 
 使用方式：
   python harvester.py --workdir c:/tmp/harvester [--depth N] [--fresh]
 
 1. 開啟 Chrome（帶你的登入狀態）
-2. 瀏覽任何 Google Doc / Sheet / Slides 時自動擷取內容
-3. 頁面內的 Google Doc/Sheet/Slides 連結會自動排入佇列背景爬取
-4. Docs/Sheets 存為 Markdown / CSV，Slides 存為 PDF
-5. 關閉瀏覽器視窗即結束
-6. 結束後自動產生 _INDEX.md 總清單
+2. 瀏覽任何網頁時自動擷取內容為 Markdown
+3. Google Docs/Sheets/Slides 使用專用匯出邏輯
+4. GitLab/GitHub 頁面自動抓 raw 內容（wiki、blob 等）
+5. 其他網頁以通用 HTML→Markdown 擷取
+6. 關閉瀏覽器視窗即結束，自動產生 _INDEX.md 總清單
 """
 
 import asyncio
@@ -37,13 +37,41 @@ TITLE_SUFFIXES = [
     ' - Google Docs', ' - Google Sheets', ' - Google Slides',
 ]
 
+# 不收割的 URL pattern
+SKIP_URL_PATTERNS = [
+    re.compile(r'127\.0\.0\.1'),
+    re.compile(r'localhost'),
+    re.compile(r'^chrome://'),
+    re.compile(r'^chrome-extension://'),
+    re.compile(r'^about:'),
+    re.compile(r'accounts\.google\.com'),
+    re.compile(r'myaccount\.google\.com'),
+    re.compile(r'mail\.google\.com'),
+    re.compile(r'calendar\.google\.com'),
+    re.compile(r'drive\.google\.com/drive'),
+    re.compile(r'google\.com/search'),
+    re.compile(r'/users/sign_in'),
+    re.compile(r'/login\b'),
+    re.compile(r'/signin\b'),
+    re.compile(r'/oauth'),
+    re.compile(r'\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)(\?|$)'),
+]
+
+# 通用頁面 — 優先取內容的 CSS selector（按平台）
+CONTENT_SELECTORS = {
+    'gitlab': ['.wiki-content', '.blob-content', '.file-content',
+               '.issue-details', '.merge-request-details', '.md', 'article'],
+    'github': ['.markdown-body', '.blob-code-content', '.comment-body', 'article'],
+    'page':   ['main', 'article', '[role="main"]'],
+}
+
 # --------------- State ---------------
 
 visited: set[str] = set()
 queue: asyncio.Queue = None
 overflow_links: list[dict] = []
 error_log: list[dict] = []
-stats = {"docs": 0, "sheets": 0, "slides": 0, "links_found": 0, "errors": 0, "overflow": 0}
+stats = {"docs": 0, "sheets": 0, "slides": 0, "pages": 0, "links_found": 0, "errors": 0, "overflow": 0}
 
 output_dir: Path = None
 max_depth: int = 1
@@ -122,6 +150,49 @@ def queue_links(html: str, depth: int, source_title: str, source_id: str):
                 "found_in": source_title, "found_in_id": source_id,
                 "would_be_depth": depth + 1,
             })
+
+
+def should_skip_url(url: str) -> bool:
+    return any(p.search(url) for p in SKIP_URL_PATTERNS)
+
+
+def normalize_url(url: str) -> str:
+    """Normalize URL for visited tracking — strip fragment."""
+    parsed = urlparse(url)
+    return f'{parsed.scheme}://{parsed.netloc}{parsed.path}'
+
+
+def classify_url(url: str) -> tuple[str, str] | None:
+    """分類 URL → (key, handler_type) 或 None（skip）。
+    handler_type: 'doc', 'sheet', 'slide', 'gitlab', 'github', 'page'"""
+    if should_skip_url(url):
+        return None
+
+    # Google Docs/Sheets/Slides
+    info = extract_doc_id(url)
+    if info:
+        return info  # (doc_id, 'doc'/'sheet'/'slide')
+
+    # 其他 docs.google.com 頁面（Drive 列表等）→ skip
+    if 'docs.google.com' in url:
+        return None
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ''
+    path = parsed.path
+    nurl = normalize_url(url)
+
+    # GitLab（self-hosted 也偵測）
+    gitlab_paths = ['/-/wikis/', '/-/blob/', '/-/tree/', '/-/issues/', '/-/merge_requests/', '/-/raw/']
+    if 'gitlab' in hostname or any(p in path for p in gitlab_paths):
+        return (nurl, 'gitlab')
+
+    # GitHub
+    if hostname in ('github.com', 'raw.githubusercontent.com'):
+        return (nurl, 'github')
+
+    # 通用網頁
+    return (nurl, 'page')
 
 
 def extract_preview(filepath: Path, max_chars: int = 80) -> str:
@@ -462,6 +533,119 @@ async def capture_slide(doc_id: str, depth: int, context: BrowserContext) -> Non
     print(f'  ✓ Slide: {title} → {filepath.name}')
 
 
+async def try_raw_content(page: Page, url: str, page_type: str) -> str | None:
+    """嘗試取得 GitLab/GitHub 的 raw 內容（不經 HTML 渲染）。"""
+    parsed = urlparse(url)
+    path = parsed.path
+
+    raw_url = None
+    if page_type == 'gitlab':
+        if '/-/wikis/' in path:
+            raw_url = url.split('?')[0]
+            if not raw_url.endswith('.md'):
+                raw_url += '.md'
+        elif '/-/blob/' in path:
+            raw_url = url.replace('/-/blob/', '/-/raw/')
+    elif page_type == 'github':
+        if '/blob/' in path:
+            # github.com/user/repo/blob/branch/file → raw.githubusercontent.com/user/repo/branch/file
+            parts = path.split('/blob/', 1)
+            if len(parts) == 2:
+                raw_url = f'https://raw.githubusercontent.com{parts[0]}/{parts[1]}'
+        elif '/wiki/' in path:
+            raw_url = url + '.md'
+
+    if not raw_url:
+        return None
+
+    try:
+        resp = await page.context.request.get(raw_url, timeout=10000)
+        if resp.ok:
+            ct = resp.headers.get('content-type', '')
+            if 'text/' in ct or 'application/json' in ct:
+                content = (await resp.body()).decode('utf-8', errors='replace')
+                if len(content.strip()) > 10:
+                    return content
+    except Exception:
+        pass
+    return None
+
+
+async def capture_page(page: Page, page_type: str = 'page') -> None:
+    """通用網頁擷取 — 直接從使用者當前頁面抓取，不開新分頁。"""
+    url = page.url
+    nurl = normalize_url(url)
+
+    # 嘗試 raw content（GitLab/GitHub）
+    raw_content = await try_raw_content(page, url, page_type)
+
+    # 取標題
+    title = ''
+    try:
+        title = await page.title()
+    except Exception:
+        pass
+    if title:
+        # GitLab: "Page · Wiki · Project · GitLab"
+        title = title.split(' · ')[0].strip()
+        # GitHub: "file.py at main · user/repo"
+        if ' at ' in title and page_type == 'github':
+            title = title.split(' at ')[0].strip()
+    if not title:
+        title = urlparse(url).path.split('/')[-1] or 'untitled'
+
+    if raw_content:
+        # 有 raw 內容，直接存
+        markdown = raw_content
+    else:
+        # 從渲染頁面擷取
+        try:
+            html = await page.content()
+        except Exception as e:
+            print(f'  ✗ Page: {e}')
+            error_log.append({"type": page_type, "doc_id": url, "reason": str(e)})
+            stats["errors"] += 1
+            return
+
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # 移除 noise
+        for tag in soup.find_all(['nav', 'header', 'footer', 'aside',
+                                   'script', 'style', 'noscript']):
+            tag.decompose()
+
+        # 用平台特定 selector 找主要內容
+        content = None
+        selectors = CONTENT_SELECTORS.get(page_type, CONTENT_SELECTORS['page'])
+        for sel in selectors + CONTENT_SELECTORS['page']:
+            content = soup.select_one(sel)
+            if content:
+                break
+        if not content:
+            content = soup.find('body') or soup
+
+        markdown = md(str(content), heading_style="ATX")
+
+        if not markdown or len(markdown.strip()) < 50:
+            print(f'  ⚠ Page: 內容太少，跳過 ({len(markdown.strip())} chars)')
+            return
+
+    filename = sanitize_filename(title)
+    filepath = safe_filepath(output_dir, filename, '.md')
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(f'---\n')
+        f.write(f'source: {url}\n')
+        f.write(f'title: "{title}"\n')
+        f.write(f'type: {page_type}\n')
+        f.write(f'harvested: "{time.strftime("%Y-%m-%d %H:%M:%S")}"\n')
+        f.write(f'---\n\n')
+        f.write(markdown)
+
+    stats["pages"] += 1
+    print(f'  ✓ {page_type.title()}: {title} → {filepath.name}')
+
+
 async def background_worker(context: BrowserContext) -> None:
     """Background worker: processes queued links via aiohttp."""
     while True:
@@ -489,25 +673,29 @@ async def background_worker(context: BrowserContext) -> None:
 
 async def on_page_navigate(page: Page) -> None:
     url = page.url
-    info = extract_doc_id(url)
-    if not info:
+    result = classify_url(url)
+    if not result:
         return
 
-    doc_id, doc_type = info
-    if doc_id in visited:
+    url_key, handler_type = result
+    if url_key in visited:
         return
-    visited.add(doc_id)  # 立即佔位，防 race condition（在 await 之前）
+    visited.add(url_key)  # 立即佔位，防 race condition（在 await 之前）
 
     print(f'\n📄 偵測到: {url}')
 
-    if doc_type == 'doc':
-        await capture_doc(doc_id, 0, page.context)
-    elif doc_type == 'sheet':
-        await capture_sheet(doc_id, 0, page.context)
+    if handler_type == 'doc':
+        await capture_doc(url_key, 0, page.context)
+    elif handler_type == 'sheet':
+        await capture_sheet(url_key, 0, page.context)
+    elif handler_type == 'slide':
+        await capture_slide(url_key, 0, page.context)
     else:
-        await capture_slide(doc_id, 0, page.context)
+        # gitlab, github, page — 直接從當前頁面擷取
+        await capture_page(page, handler_type)
 
-    print(f'  📊 已收割: {stats["docs"]} docs, {stats["sheets"]} sheets, {stats["slides"]} slides | '
+    print(f'  📊 已收割: {stats["docs"]} docs, {stats["sheets"]} sheets, '
+          f'{stats["slides"]} slides, {stats["pages"]} pages | '
           f'佇列: {stats["links_found"]} | 錯誤: {stats["errors"]}')
 
 
@@ -516,6 +704,7 @@ def generate_index(out_dir: Path) -> None:
     docs = []
     sheets = []
     slides = []
+    pages = []
 
     for f in sorted(out_dir.glob('*.md')):
         if f.name.startswith('_'):
@@ -540,6 +729,9 @@ def generate_index(out_dir: Path) -> None:
                 sheets.append(meta)
             elif 'slide' in meta["type"]:
                 slides.append(meta)
+            elif meta["type"] in ('gitlab', 'github', 'page', 'gitlab-wiki',
+                                   'gitlab-file', 'github-file', 'web-page'):
+                pages.append(meta)
             else:
                 docs.append(meta)
         except Exception:
@@ -547,10 +739,14 @@ def generate_index(out_dir: Path) -> None:
 
     lines = []
     lines.append('# 收割總清單\n')
-    total = len(docs) + len(sheets) + len(slides)
+    total = len(docs) + len(sheets) + len(slides) + len(pages)
+    parts = []
+    if docs: parts.append(f'{len(docs)} Docs')
+    if sheets: parts.append(f'{len(sheets)} Sheets')
+    if slides: parts.append(f'{len(slides)} Slides')
+    if pages: parts.append(f'{len(pages)} Pages')
     lines.append(f'> 收割時間：{time.strftime("%Y-%m-%d %H:%M")} | '
-                 f'共 {total} 份文件'
-                 f'（{len(docs)} Docs + {len(sheets)} Sheets + {len(slides)} Slides）\n')
+                 f'共 {total} 份文件（{" + ".join(parts)}）\n')
 
     if docs:
         lines.append('\n## Google Docs\n')
@@ -575,6 +771,14 @@ def generate_index(out_dir: Path) -> None:
         for i, d in enumerate(slides, 1):
             src = f'[開啟]({d["source"]})' if d["source"] else ''
             lines.append(f'| {i} | {d["title"]} | {d["preview"]} | {src} |')
+
+    if pages:
+        lines.append('\n## Web Pages (GitLab / GitHub / 其他)\n')
+        lines.append('| # | 標題 | 類型 | 摘要 | 來源 |')
+        lines.append('|---|------|------|------|------|')
+        for i, d in enumerate(pages, 1):
+            src = f'[開啟]({d["source"]})' if d["source"] else ''
+            lines.append(f'| {i} | {d["title"]} | {d["type"]} | {d["preview"]} | {src} |')
 
     if error_log:
         lines.append('\n## 收割失敗\n')
@@ -689,7 +893,7 @@ async def main():
         # Background worker
         worker_task = asyncio.create_task(background_worker(context))
 
-        # Listen for navigation
+        # Listen for navigation (full page loads)
         def setup_page(page: Page):
             page.on('framenavigated', lambda frame: (
                 asyncio.create_task(on_page_navigate(page))
@@ -699,6 +903,31 @@ async def main():
         for pg in context.pages:
             setup_page(pg)
         context.on('page', setup_page)
+
+        # SPA URL poller — 偵測 pushState/replaceState 導航（GitLab 等 SPA 不觸發 framenavigated）
+        page_last_url: dict[Page, str] = {}
+
+        async def spa_url_poller():
+            while True:
+                await asyncio.sleep(2)
+                try:
+                    for pg in context.pages:
+                        try:
+                            current = pg.url
+                        except Exception:
+                            continue
+                        prev = page_last_url.get(pg)
+                        if prev != current:
+                            page_last_url[pg] = current
+                            # 第一次看到（prev is None）也檢查，因為可能是已開啟的 tab
+                            result = classify_url(current)
+                            if result and result[0] not in visited:
+                                print(f'  🔄 SPA 偵測: {current[:80]}')
+                                await on_page_navigate(pg)
+                except Exception:
+                    pass
+
+        poller_task = asyncio.create_task(spa_url_poller())
 
         # Open dashboard tab
         dash_page = await context.new_page()
@@ -721,7 +950,12 @@ async def main():
         except Exception:
             pass
 
+        poller_task.cancel()
         worker_task.cancel()
+        try:
+            await poller_task
+        except asyncio.CancelledError:
+            pass
         try:
             await worker_task
         except asyncio.CancelledError:
@@ -736,6 +970,7 @@ async def main():
     print(f' Docs:     {stats["docs"]}')
     print(f' Sheets:   {stats["sheets"]}')
     print(f' Slides:   {stats["slides"]}')
+    print(f' Pages:    {stats["pages"]}')
     print(f' Overflow: {stats["overflow"]}')
     print(f' Errors:   {stats["errors"]}')
     print(f' Output:   {output_dir.resolve()}')
