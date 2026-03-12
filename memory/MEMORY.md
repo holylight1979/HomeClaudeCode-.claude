@@ -14,6 +14,7 @@
 | v2.9-spec | memory/v3-design-spec.md | V2.9, V3, 設計, 檢索強化, project-alias, ACT-R, multi-hop, blind-spot | [固] |
 | v3-research | memory/v3-research-insights.md | 研究, 認知科學, 佛學, 唯識, ACT-R, spreading activation | [觀] |
 | unity-yaml | memory/unity/unity-yaml.md | Unity YAML, fileID, GUID, PrefabInstance, .prefab, .meta, 型別ID, 序列化, Missing Script | [固] |
+| gdoc-harvester | memory/gdoc-harvester.md | harvester, Google Docs, Sheets, 收割, Playwright, cookie, export, aiohttp | [觀] |
 
 ---
 

@@ -22,6 +22,13 @@
 - [臨] VS Code "Open in New Tab" 開 Claude Code 會與側邊欄 CHAT 面板搶焦點 → 點擊/貼上操作進入錯誤面板 → 改用 "Open in New Window" 獨立視窗（根因: 同視窗兩個 webview 輸入框座標重疊）
 - [固] MCP server 設定用 `npx.cmd` 在 VSCode 子進程中啟動失敗（`cmd /c npx` 也不行）→ 全域安裝套件後改用 `node.exe` 直接跑 `.js` 入口點（根因: VSCode extension 環境 spawn `.cmd` 批次檔失敗；解法: `npm install -g <pkg>` → 找 package.json `bin` 欄位對應的 .js → 用 `node.exe <path>.js` 替代 npx）
 
+### Playwright + Google 踩坑
+
+- [觀] Playwright Chromium 無法登入 Google → Google 偵測 `--enable-automation` 旗標 → 用 `channel="chrome"` + `--disable-blink-features=AutomationControlled`（根因: Google 反自動化偵測）
+- [觀] `context.request.get()` 不帶 browser cookies → export URL 回 401 → 改用 `context.cookies()` 同步到 aiohttp（根因: Playwright API request 獨立於 browser cookie store）
+- [觀] `page.evaluate` + `fetch()` 對 Google export URL 被 CORS 擋 → export URL redirect 跨域 → 改用 aiohttp server-side 請求（根因: browser fetch 無法跨域 follow Google CDN redirect）
+- [觀] `page.goto()` Google export URL 觸發 download 而非頁面渲染 → Playwright 報 "Download is starting" → 需 `accept_downloads=True` + `expect_download()`（根因: export URL 回 Content-Disposition: attachment）
+
 ### 假設錯誤（Wrong Assumption）
 
 （記錄格式：{假設內容} → {實際情況}（發現於: {context}））
