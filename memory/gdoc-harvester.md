@@ -1,10 +1,10 @@
 ---
 name: gdoc-harvester
-description: Google Docs/Sheets/Slides 收割工具經驗 — Playwright + Chrome + page.goto export
+description: Web Harvester 收割工具經驗 — Playwright + Chrome，支援 Google Docs/Sheets/Slides + GitLab/GitHub + 通用網頁
 type: project
 ---
 
-## Google Docs/Sheets Harvester
+## Web Harvester
 
 **位置**: `~/.claude/tools/gdoc-harvester/`（技能本體，可上 GIT）
 **Skill**: `/harvest`（`~/.claude/commands/harvest.md`）
@@ -22,11 +22,10 @@ type: project
 
 4. **`page.evaluate` + `fetch()` 被 CORS 擋** — Google export redirect 跨域
 
-5. **aiohttp cookie 同步不足** — Sheets export 全部 401
-   - 狀態: **已淘汰**。aiohttp 已完全移除
+5. ~~**aiohttp cookie 同步不足**~~ — 已淘汰，aiohttp 已完全移除
 
 6. **framenavigated race condition** — 同一 doc_id 多次觸發
-   - 解法: `on_page_navigate` 在第一個 await 前 `visited.add(doc_id)` 佔位
+   - 解法: `on_page_navigate` 在第一個 await 前 `visited.add(url_key)` 佔位
 
 7. **capture_doc/sheet 自殺 bug** — on_page_navigate 已加 visited，capture 又 `if in visited: return`
    - 解法: 移除 capture 的 early return，只保留冪等 `visited.add()`
@@ -36,36 +35,42 @@ type: project
 
 9. **Sheets export 全部 401/400** — `context.request.get()` 和 `page.goto(export_url)` 都回傳 400
    - 原因: Google Sheets export redirect 到 `googleusercontent.com`，需要正確 Referer + session context
-   - 狀態: **已修正**。改用 `sheet_download()` — 先開 Sheet 編輯頁建立 context，再用 `page.evaluate('window.location.href=...')` 從該頁觸發 export
+   - 解法: `sheet_download()` — 先開 Sheet 編輯頁建立 context，再 `page.evaluate('window.location.href=...')` 觸發
    - 端點: 優先 `gviz/tq?tqx=out:csv` → fallback `/export?format=csv`
-   - 實測: 8 個 Sheet 全部成功（CSV + HTML 雙格式）
 
-10. **GitLab 登入無法持續** — copytree 完整 profile 後仍無法登入
-    - 狀態: **已解決**。放棄複製 cookies 方案，改為首次在 Playwright 收割瀏覽器裡手動登入，persistent context 會記住
+10. **GitLab 登入無法持續** — 放棄複製 cookies，改為首次在收割瀏覽器手動登入，persistent context 記住
 
-11. **Google Slides 支援**
-    - 狀態: **已實作**。presentation/d/ pattern + capture_slide()（export PDF + frontmatter .md 索引）
+11. **Google export URL 觸發下載而非頁面載入**
+    - 解法: `context.request.get()` 優先 + `asyncio.wait` race fallback
 
-12. **Google export URL 觸發下載而非頁面載入** — `page.goto(export_url)` 不回傳 response body
-    - 原因: Google export 回傳 `Content-Disposition: attachment`，Playwright 轉為 download 事件
-    - 錯誤解法: `expect_download(timeout=30s)` — 權限不足時載入錯誤頁面，等 30s 才超時
-    - 最終解法: **`context.request.get()`**（共享 browser cookies，直接拿 HTTP status + body + Content-Type）
-    - Fallback: `asyncio.wait` race pattern（若 request API 不帶 cookies）
-    - 參考: playwright-python #1264, Playwright 官方 Downloads/Navigations 文件
+12. **Google 權限不足錯誤頁偵測**
+    - 解法: 檢查 `page.content()` 含「無法開啟」「很抱歉」→ 回傳 403
 
-13. **Google 權限不足錯誤頁偵測** — export URL 無權限時顯示「很抱歉，目前無法開啟這個檔案」
-    - 解法: race timeout 後檢查 `page.content()` 是否含「無法開啟」「很抱歉」等關鍵字 → 回傳 403
+13. **GitLab/GitHub SPA 頁面不觸發 framenavigated** — SPA 用 pushState 導航
+    - 原因: `framenavigated` 只偵測完整頁面載入，SPA 的 `history.pushState` 不觸發
+    - 解法: **SPA URL poller** — 每 2 秒掃描所有分頁 `page.url`，偵測變化後觸發 `on_page_navigate()`
+    - 與 `framenavigated` 並存，不衝突
+
+14. **知乎/YouTube 等 JS-rendered 頁面內容太少** — Playwright 拿到的 HTML 缺乏主要內容
+    - 現狀: 跳過（< 50 chars），未來可考慮 `page.wait_for_selector()` 等待渲染
 
 ### 架構
 
-- Playwright Chrome (persistent context) → 使用者瀏覽
-- `framenavigated` 偵測 Google Docs/Sheets/Slides URL
-- Docs/Slides: `page_fetch()` — `context.request.get()` 優先，fallback download race
-- Sheets: `sheet_download()` — 從 Sheet 編輯頁觸發 `gviz/tq` 或 `/export`（帶正確 Referer）
-- `markdownify` + `BeautifulSoup` → Markdown 轉換 + 連結提取
-- Slides → PDF export（無 HTML export）
-- Dashboard (`http://127.0.0.1:8787`) → 即時進度（含摘要預覽）
-- 結束後自動產生 `_INDEX.md` 總清單
+```
+classify_url(url) → (key, type) | None
+  ├─ Google Docs/Sheets/Slides → 專用 export 邏輯
+  ├─ GitLab (hostname 含 "gitlab" 或 /-/ 路徑) → capture_page + try_raw_content
+  ├─ GitHub (github.com) → capture_page + try_raw_content
+  ├─ SKIP_URL_PATTERNS 命中 → None（不收割）
+  └─ 其他 → capture_page（通用 HTML→Markdown）
+```
+
+- **偵測引擎**: `framenavigated`（完整導航）+ SPA URL poller（pushState）
+- **Google 專用**: `page_fetch()` / `sheet_download()` / `capture_slide()`
+- **通用擷取**: `capture_page()` — 平台 CSS selector (`CONTENT_SELECTORS`) + noise 移除 + `markdownify`
+- **Raw content**: `try_raw_content()` — GitLab wiki `.md` / blob `/-/raw/`、GitHub `raw.githubusercontent.com`
+- **Dashboard**: `http://127.0.0.1:8787` — 即時進度（Docs/Sheets/Slides/Pages 統計 + type badge）
+- **結束**: 關閉瀏覽器 → `_INDEX.md` 總清單
 
 ### 安全設計
 
@@ -73,5 +78,5 @@ type: project
 - browser-data（含所有網站 cookies）存在 runtime 工作目錄，不進 git
 - Skill 流程提醒使用者事後清理敏感資料
 
-**Why:** 使用者要把散落在 Google Drive 的公司文件整理收割
+**Why:** 使用者要把散落在 Google Drive / GitLab / 各處的公司文件整理收割
 **How to apply:** `/harvest` skill 使用或後續改進時參考
