@@ -253,40 +253,123 @@ async def capture_doc(doc_id: str, depth: int, context: BrowserContext) -> None:
     queue_links(html, depth, title, doc_id)
 
 
+async def sheet_download(page: Page, doc_id: str, fmt: str, gid: str = '0') -> tuple[int, bytes]:
+    """從已開啟的 Sheet 頁面觸發 export 下載。
+    先嘗試 gviz/tq 端點（不 redirect），失敗再用 /export（帶正確 Referer）。"""
+    urls = [
+        f'https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:{fmt}&gid={gid}',
+        f'https://docs.google.com/spreadsheets/d/{doc_id}/export?format={fmt}&gid={gid}',
+    ]
+    for url in urls:
+        try:
+            download_future = asyncio.ensure_future(page.wait_for_event('download'))
+            await page.evaluate(f'window.location.href = "{url}"')
+            done, _ = await asyncio.wait({download_future}, timeout=10)
+            if done:
+                download = download_future.result()
+                tmp_path = await download.path()
+                if tmp_path:
+                    data = Path(tmp_path).read_bytes()
+                    if data:
+                        print(f'    [sheet_download] ✓ {fmt} via {url.split("/d/")[1][:30]}')
+                        return 200, data
+                failure = await download.failure()
+                print(f'    [sheet_download] download failed: {failure}')
+            else:
+                download_future.cancel()
+                # 沒觸發 download — 檢查是否導航到 CSV 文字頁
+                content = await page.content()
+                if '無法開啟' in content or '很抱歉' in content:
+                    print(f'    [sheet_download] 權限不足 (403)')
+                    continue
+                # gviz 端點直接回傳文字，不觸發 download
+                body = content.encode('utf-8')
+                if len(body) > 100:  # 有實際內容
+                    print(f'    [sheet_download] ✓ {fmt} (text response)')
+                    return 200, body
+                print(f'    [sheet_download] 無內容，嘗試下一個 URL')
+        except Exception as e:
+            print(f'    [sheet_download] {e}')
+            download_future.cancel()
+        # 回到 sheet 編輯頁再試下一個 URL
+        try:
+            await page.goto(
+                f'https://docs.google.com/spreadsheets/d/{doc_id}/edit',
+                wait_until='domcontentloaded', timeout=15000)
+        except Exception:
+            pass
+    return 400, b''
+
+
 async def capture_sheet(doc_id: str, depth: int, context: BrowserContext) -> None:
     visited.add(doc_id)
 
-    # CSV export
-    csv_data = None
+    # 先開 Sheet 編輯頁 — 取標題 + 建立 page context（Referer、cookies）
+    page = await context.new_page()
+    title = doc_id
     try:
-        csv_url = f'https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid=0'
-        status, body = await page_fetch(context, csv_url)
-        if status == 200 and body:
-            csv_data = body.decode('utf-8', errors='replace')
-    except Exception:
-        csv_data = None
-
-    # HTML export (for title, links, and markdown conversion)
-    try:
-        html_url = f'https://docs.google.com/spreadsheets/d/{doc_id}/export?format=html'
-        status, body = await page_fetch(context, html_url)
-        html = body.decode('utf-8', errors='replace')
-        if status != 200 or not html:
-            print(f'  ✗ Sheet {doc_id[:20]}: HTTP {status}')
-            error_log.append({"type": "sheet", "doc_id": doc_id, "reason": f"HTTP {status}"})
-            stats["errors"] += 1
-            return
+        await page.goto(
+            f'https://docs.google.com/spreadsheets/d/{doc_id}/edit',
+            wait_until='domcontentloaded', timeout=20000,
+        )
+        raw_title = await page.title()
+        if raw_title:
+            title = clean_title(raw_title.strip())
     except Exception as e:
-        print(f'  ✗ Sheet {doc_id[:20]}: {e}')
-        error_log.append({"type": "sheet", "doc_id": doc_id, "reason": str(e)})
+        print(f'  ✗ Sheet {doc_id[:20]}: 無法開啟 ({e})')
+        error_log.append({"type": "sheet", "doc_id": doc_id, "reason": f"open failed: {e}"})
+        stats["errors"] += 1
+        try:
+            await page.close()
+        except Exception:
+            pass
+        return
+
+    # CSV export — 從已開啟的 Sheet 頁面觸發
+    csv_data = None
+    status, body = await sheet_download(page, doc_id, 'csv')
+    if status == 200 and body:
+        csv_data = body.decode('utf-8', errors='replace')
+        # gviz 回傳可能被包在 HTML 裡，清理
+        if csv_data.strip().startswith('<!') or csv_data.strip().startswith('<html'):
+            soup = BeautifulSoup(csv_data, 'html.parser')
+            pre = soup.find('pre')
+            if pre:
+                csv_data = pre.get_text()
+            else:
+                # 整頁是 HTML wrapper，取 body text
+                csv_data = soup.get_text()
+
+    # 回到 sheet 頁，取 HTML export
+    html = None
+    try:
+        await page.goto(
+            f'https://docs.google.com/spreadsheets/d/{doc_id}/edit',
+            wait_until='domcontentloaded', timeout=15000)
+    except Exception:
+        pass
+    html_status, html_body = await sheet_download(page, doc_id, 'html')
+    if html_status == 200 and html_body:
+        html = html_body.decode('utf-8', errors='replace')
+
+    try:
+        await page.close()
+    except Exception:
+        pass
+
+    if not csv_data and not html:
+        print(f'  ✗ Sheet {doc_id[:20]}: CSV+HTML 都失敗')
+        error_log.append({"type": "sheet", "doc_id": doc_id, "reason": "export failed"})
         stats["errors"] += 1
         return
 
-    # Title
-    soup = BeautifulSoup(html, 'html.parser')
-    title_tag = soup.find('title')
-    title = title_tag.text.strip() if title_tag else doc_id
-    title = clean_title(title)
+    if not title or title == doc_id:
+        if html:
+            soup = BeautifulSoup(html, 'html.parser')
+            t = soup.find('title')
+            if t and t.text.strip():
+                title = clean_title(t.text.strip())
+
     filename = sanitize_filename(title)
 
     # Save CSV
@@ -297,9 +380,14 @@ async def capture_sheet(doc_id: str, depth: int, context: BrowserContext) -> Non
         print(f'  ✓ Sheet (CSV): {title} → {csv_path.name}')
 
     # Save HTML→Markdown
-    markdown = md(html, heading_style="ATX")
-    md_path = safe_filepath(output_dir, filename, '.md')
+    if html:
+        markdown = md(html, heading_style="ATX")
+    elif csv_data:
+        markdown = f'```csv\n{csv_data}\n```'
+    else:
+        markdown = ''
 
+    md_path = safe_filepath(output_dir, filename, '.md')
     with open(md_path, 'w', encoding='utf-8') as f:
         f.write(f'---\n')
         f.write(f'source: https://docs.google.com/spreadsheets/d/{doc_id}\n')
@@ -311,7 +399,8 @@ async def capture_sheet(doc_id: str, depth: int, context: BrowserContext) -> Non
 
     stats["sheets"] += 1
     print(f'  ✓ Sheet (MD): {title} → {md_path.name}')
-    queue_links(html, depth, title, doc_id)
+    if html:
+        queue_links(html, depth, title, doc_id)
 
 
 async def capture_slide(doc_id: str, depth: int, context: BrowserContext) -> None:

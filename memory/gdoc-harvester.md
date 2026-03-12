@@ -23,7 +23,7 @@ type: project
 4. **`page.evaluate` + `fetch()` 被 CORS 擋** — Google export redirect 跨域
 
 5. **aiohttp cookie 同步不足** — Sheets export 全部 401
-   - 最終解法: **改用 `page.goto(export_url)` + `resp.body()`**，直接帶完整 browser auth，不再用 aiohttp
+   - 狀態: **已淘汰**。aiohttp 已完全移除
 
 6. **framenavigated race condition** — 同一 doc_id 多次觸發
    - 解法: `on_page_navigate` 在第一個 await 前 `visited.add(doc_id)` 佔位
@@ -34,8 +34,11 @@ type: project
 8. **標題抓取失敗** — Google export HTML 的 `<title>` 常空或只有 doc_id
    - 解法: 多層 fallback: `<title>` → h1/h2/h3 → 第一段文字 → doc_id
 
-9. **Sheets export 全部 401/400** — aiohttp cookie 同步不足
-   - 狀態: **已修正**。改用 `page.goto(export_url)` + `resp.body()` 取代 aiohttp，直接帶 browser auth
+9. **Sheets export 全部 401/400** — `context.request.get()` 和 `page.goto(export_url)` 都回傳 400
+   - 原因: Google Sheets export redirect 到 `googleusercontent.com`，需要正確 Referer + session context
+   - 狀態: **已修正**。改用 `sheet_download()` — 先開 Sheet 編輯頁建立 context，再用 `page.evaluate('window.location.href=...')` 從該頁觸發 export
+   - 端點: 優先 `gviz/tq?tqx=out:csv` → fallback `/export?format=csv`
+   - 實測: 8 個 Sheet 全部成功（CSV + HTML 雙格式）
 
 10. **GitLab 登入無法持續** — copytree 完整 profile 後仍無法登入
     - 狀態: **已解決**。放棄複製 cookies 方案，改為首次在 Playwright 收割瀏覽器裡手動登入，persistent context 會記住
@@ -57,7 +60,8 @@ type: project
 
 - Playwright Chrome (persistent context) → 使用者瀏覽
 - `framenavigated` 偵測 Google Docs/Sheets/Slides URL
-- `page_fetch()`: `context.request.get()` 優先（直接 HTTP），fallback `asyncio.wait` race
+- Docs/Slides: `page_fetch()` — `context.request.get()` 優先，fallback download race
+- Sheets: `sheet_download()` — 從 Sheet 編輯頁觸發 `gviz/tq` 或 `/export`（帶正確 Referer）
 - `markdownify` + `BeautifulSoup` → Markdown 轉換 + 連結提取
 - Slides → PDF export（無 HTML export）
 - Dashboard (`http://127.0.0.1:8787`) → 即時進度（含摘要預覽）
