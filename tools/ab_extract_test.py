@@ -1,3 +1,4 @@
+# ONE-OFF: 一次性測試腳本，非常規工具
 """
 ab_extract_test.py — A/B 萃取品質驗證：rdchat (qwen3.5) vs local (qwen3:1.7b)
 

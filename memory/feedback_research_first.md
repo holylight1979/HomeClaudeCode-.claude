@@ -1,8 +1,10 @@
----
-name: feedback_research_first
-description: 修復失敗超過門檻次數時，必須主動搜尋網路知識輔助推論，不要持續試錯
-type: feedback
----
+# feedback-research — 試錯門檻與搜尋策略
+
+- Scope: global
+- Confidence: [固]
+- Trigger: 試錯, trial-and-error, 不熟悉, API, 框架, 搜尋, research
+- Last-used: 2026-03-13
+- Confirmations: 8
 
 修復同一個技術問題連續失敗時，必須主動搜尋網路知識來驗證/推翻推論、找到正確解法。
 

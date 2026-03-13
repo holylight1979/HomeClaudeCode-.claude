@@ -101,7 +101,7 @@ Claude Code 啟動時載入順序：
 
 **參考文件**（_reference/，不自動注入）：SPEC(950行), self-iteration, v3-design, v3-research
 
-**Wisdom Engine**：DESIGN.md(架構) + reflection_metrics.json(live 指標) + causal_graph.json(空 stub)
+**Wisdom Engine**：DESIGN.md(架構) + reflection_metrics.json(live 指標)
 
 **運行時**（gitignore）：episodic/, _vectordb/, _staging/, _distant/
 

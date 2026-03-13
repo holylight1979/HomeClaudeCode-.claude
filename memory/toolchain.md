@@ -65,8 +65,8 @@ A/B 對比：2 段真實 transcript（Redmine debug + NuGet build），各 4000 
 
 ### 環境特殊配置
 
-- [固] ChromaDB 用 SQLite backend（i7-3770 不支援 AVX2，預設 HNSW backend 會 crash）
-- [固] Ollama 同時只能跑一個模型（GTX 1050 Ti 4GB VRAM 限制），embedding 和推論模型需輪替
+- [固] ChromaDB 用 SQLite backend（舊機 i7-3770 不支援 AVX2，現已改用 LanceDB）
+- [固] Local fallback（GTX 1050 Ti 4GB）同時只能跑一個模型，embedding 和推論需輪替；rdchat（RTX 3090）無此限制
 - [固] workflow-guardian.py stdout/stderr 強制 UTF-8（Windows 預設 cp950 會導致中文亂碼）
 
 ## 行動

@@ -30,13 +30,10 @@ from ollama_client import get_client, check_long_die_status, disable_backend, Ol
 # ─── V2.8: Wisdom Engine (lazy import, graceful fallback) ────────────────────
 try:
     from wisdom_engine import (
-        add_causal_edge,
-        get_causal_warnings,
         classify_situation,
         get_reflection_summary,
         reflect as wisdom_reflect,
         track_retry as wisdom_track_retry,
-        update_causal_confidence,
     )
     WISDOM_AVAILABLE = True
 except ImportError:
@@ -50,7 +47,7 @@ MEMORY_DIR = CLAUDE_DIR / "memory"
 EPISODIC_DIR = MEMORY_DIR / "episodic"
 CONFIG_PATH = WORKFLOW_DIR / "config.json"
 MEMORY_INDEX = "MEMORY.md"
-CONTEXT_BUDGET_LIMIT = 3000  # V2.11: hard token cap for additionalContext
+CONTEXT_BUDGET_DEFAULT = 3000  # V2.11: default token cap (overridden by compute_token_budget)
 
 # Defaults (overridable via config.json)
 DEFAULTS = {
@@ -78,7 +75,6 @@ DEFAULTS = {
     },
     # v2.2 Sprint 2: Proactive classification
     "proactive": {
-        "auto_promote_lin": True,   # [臨]→[觀] auto-promote
         "pattern_threshold": 2,     # N episodic sessions before suggesting dedicated atom
         "migration_hint_threshold": 3,  # N session references before migration hint
     },
@@ -450,7 +446,7 @@ def load_atoms_within_budget(
 
 
 def _truncate_context_by_activation(
-    lines: List[str], limit: int = CONTEXT_BUDGET_LIMIT
+    lines: List[str], limit: int = CONTEXT_BUDGET_DEFAULT
 ) -> List[str]:
     """V2.11: Truncate additionalContext lines to fit within token budget.
 
@@ -975,6 +971,7 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         review_reminder = _check_periodic_review_due(config)
         if review_reminder:
             lines.append(review_reminder)
+            state["review_due"] = True
     except Exception as e:
         print(f"[v2.6] Review check error: {e}", file=sys.stderr)
 
@@ -1065,13 +1062,10 @@ def handle_user_prompt_submit(
             proactive_lines = _proactive_classify(state, episodic_results, prompt, config)
             lines.extend(proactive_lines)
 
-    # ─── V2.8: Wisdom Engine — causal warnings + situation ──────────
+    # ─── V2.8: Wisdom Engine — situation classification ──────────
     if WISDOM_AVAILABLE:
         try:
             mod_paths = [m["path"] for m in state.get("modified_files", [])]
-            if mod_paths:
-                causal = get_causal_warnings(mod_paths)
-                lines.extend(causal)
             tracker = state.get("topic_tracker", {})
             prompt_analysis = {
                 "intent": tracker.get("intent_distribution", {}).get("top", ""),
@@ -1395,7 +1389,7 @@ def handle_user_prompt_submit(
 
     if lines:
         # V2.11: Context budget hard cap
-        lines = _truncate_context_by_activation(lines, CONTEXT_BUDGET_LIMIT)
+        lines = _truncate_context_by_activation(lines, budget)
         output_json({
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
@@ -1689,13 +1683,13 @@ _EXTRACT_PROMPT_TEMPLATE = (
 
 
 def _llm_extract_knowledge(text: str, existing_queue: List[dict],
-                           source: str = "per-turn") -> List[dict]:
-    """Use local LLM (qwen3:1.7b) to extract knowledge from assistant text.
+                           source: str = "session-end") -> List[dict]:
+    """Use local LLM to extract knowledge from assistant text (SessionEnd only).
 
     Args:
         text: Assistant response text
         existing_queue: Already queued knowledge items (for dedup)
-        source: "per-turn" or "session-end" (affects limits and timeout)
+        source: extraction source label
 
     Returns:
         List of knowledge items: [{content, classification, knowledge_type, source, at}]
@@ -1703,13 +1697,8 @@ def _llm_extract_knowledge(text: str, existing_queue: List[dict],
     if not text or len(text) < 50:
         return []
 
-    # Source-dependent limits (timeout handled by _call_ollama_generate default)
-    if source == "per-turn":
-        max_chars = 3000
-        max_items = 2
-    else:  # session-end
-        max_chars = 4000
-        max_items = 5
+    max_chars = 4000
+    max_items = 5
 
     truncated = text[:max_chars]
     prompt = _EXTRACT_PROMPT_TEMPLATE.format(text=truncated)
@@ -2312,49 +2301,46 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
     state["ended_at"] = _now_iso()
     state["phase"] = "done"
 
-    # ─── V2.4: Collect any pending per-turn extraction ──────────────
-    pending = state.pop("pending_extraction", [])
-    if pending:
-        state.setdefault("knowledge_queue", []).extend(pending)
-
-    # ─── V2.4: SessionEnd transcript extraction (补漏) ────────────────
+    # ─── V2.11-fix: Spawn extract-worker.py as detached subprocess ──────
+    # extract-worker handles: transcript reading, LLM extraction, cross-session
+    # observation, and pattern aggregation — all independently of hook timeout.
     rc = config.get("response_capture", {})
     if rc.get("enabled", True):
         try:
+            import subprocess
             cwd = state.get("session", {}).get("cwd", "")
-            transcript = _find_session_transcript(session_id, cwd)
-            if transcript:
-                se_max = rc.get("session_end_max_chars", 20000)
-                texts = _extract_all_assistant_texts(transcript, max_chars=se_max)
-                if texts:
-                    combined = "\n---\n".join(texts)
-                    existing = state.get("knowledge_queue", [])
-                    new_items = _llm_extract_knowledge(
-                        combined, existing, source="session-end"
-                    )
-                    if new_items:
-                        state.setdefault("knowledge_queue", []).extend(new_items)
-                        print(
-                            f"[v2.4] SessionEnd extraction: {len(new_items)} items",
-                            file=sys.stderr,
-                        )
-        except Exception as e:
-            print(f"[v2.4] SessionEnd extraction error: {e}", file=sys.stderr)
-
-    # ─── V2.4 Phase 3: Cross-session pattern consolidation ──────────
-    cross_obs = []
-    kq = state.get("knowledge_queue", [])
-    if kq and config.get("vector_search", {}).get("enabled", True):
-        try:
-            cross_obs = _check_cross_session_patterns(kq, session_id, config)
-            if cross_obs:
-                state["cross_session_observations"] = cross_obs
+            tracker = state.get("topic_tracker", {})
+            intent = tracker.get("intent_distribution", {}).get("top", "build")
+            worker_ctx = json.dumps({
+                "session_id": session_id,
+                "cwd": cwd,
+                "config": config,
+                "knowledge_queue": state.get("knowledge_queue", []),
+                "session_intent": intent,
+            }, ensure_ascii=False)
+            worker_path = CLAUDE_DIR / "hooks" / "extract-worker.py"
+            if worker_path.exists():
+                # Detached subprocess: survives hook timeout
+                kwargs = {}
+                if sys.platform == "win32":
+                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+                else:
+                    kwargs["start_new_session"] = True
+                proc = subprocess.Popen(
+                    [sys.executable, str(worker_path)],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    **kwargs,
+                )
+                proc.stdin.write(worker_ctx.encode("utf-8"))
+                proc.stdin.close()
                 print(
-                    f"[v2.4] Cross-session: {len(cross_obs)} patterns detected",
+                    f"[v2.11] extract-worker spawned (pid={proc.pid}, intent={intent})",
                     file=sys.stderr,
                 )
         except Exception as e:
-            print(f"[v2.4] Cross-session check error: {e}", file=sys.stderr)
+            print(f"[v2.11] extract-worker spawn error: {e}", file=sys.stderr)
 
     mod_count = len(state.get("modified_files", []))
     kq_count = len(state.get("knowledge_queue", []))
@@ -2436,6 +2422,15 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
             episodic_generated = True
         except Exception as e:
             print(f"[episodic] generation failed: {e}", file=sys.stderr)
+
+    # V2.11-fix: Save review marker if review was due this session
+    if state.get("review_due"):
+        try:
+            total = sum(1 for _ in EPISODIC_DIR.glob("episodic-*.md")) if EPISODIC_DIR.exists() else 0
+            _save_review_marker(total)
+            print(f"[v2.6] Review marker saved (total={total})", file=sys.stderr)
+        except Exception as e:
+            print(f"[v2.6] Review marker save error: {e}", file=sys.stderr)
 
     write_state(session_id, state)
 

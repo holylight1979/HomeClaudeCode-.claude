@@ -72,27 +72,7 @@
     "min_files": 1,
     "min_duration_seconds": 120
   },
-  "cleanup": {
-    "ended_ttl_ms": 60000,
-    "orphan_done_ttl_ms": 1800000,
-    "orphan_working_ttl_ms": 86400000
-  },
-  "session_awareness": {
-    "enabled": true,
-    "max_keyword_signals": 20,
-    "max_triggers": 12
-  },
-  "decay": {
-    "enforce_on_audit": false,
-    "staleness_thresholds": {
-      "[固]": 90,
-      "[觀]": 60,
-      "[臨]": 30
-    },
-    "auto_archive_临": true,
-    "mark_观_pending_review": true,
-    "never_auto_archive_固": true
-  },
+  "_unused_cleanup": "cleanup/session_awareness/decay 設定僅供 memory-audit.py --enforce 使用，guardian 不讀取",
   "cross_session": {
     "enabled": true,
     "min_score": 0.75,
@@ -102,13 +82,8 @@
   },
   "response_capture": {
     "enabled": true,
-    "per_turn_enabled": false,
-    "per_turn_max_chars": 3000,
-    "per_turn_max_items": 2,
-    "per_turn_min_response_chars": 100,
     "session_end_max_chars": 20000,
     "session_end_max_items": 5,
-    "ollama_timeout_seconds": 3,
     "session_end_timeout_seconds": 10,
     "classification_default": "[臨]"
   }

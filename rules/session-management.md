@@ -31,7 +31,7 @@
 **適用範圍：規則管理。不適用於回答使用者問題。**
 定期檢閱：收到提醒時掃描 episodic atoms，收攏重複，完成後寫入 `workflow/last_review_marker.json`。
 
-> 完整 8 條規則：`memory/self-iteration.md`
+> 完整 3 條核心原則：`memory/_reference/self-iteration.md`
 
 ## 提醒開新 Session
 

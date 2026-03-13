@@ -163,12 +163,12 @@ memory/
 - Last-used: YYYY-MM-DD
 - Confirmations: 5
 - Created: YYYY-MM-DD            ← v2.1（首次建立日期）
-- TTL: 30d                       ← v2.1（可選，null = 由 confidence 決定）
-- Expires-at: YYYY-MM-DD         ← v2.1（可選，自動計算）
-- Privacy: public                ← v2.1（public/internal/sensitive，預設 public）
+- TTL: 30d                       ← v2.1 [DEPRECATED-unused] 可選，無 atom 使用
+- Expires-at: YYYY-MM-DD         ← v2.1 [DEPRECATED-unused] 可選，無 atom 使用
+- Privacy: public                ← v2.1 [DEPRECATED-unused] 可選，無程式讀取
 - Tags: pitfall, architecture    ← v2.1（可選，分類標籤）
 - Related: other-atom-name       ← v2.1（可選，關聯 atom）
-- Supersedes: old-atom-name      ← v2.1（可選，取代的舊 atom）
+- Supersedes: old-atom-name      ← v2.1 [DEPRECATED-unused] 可選，無 atom 使用
 - Quality: 0.85                  ← v2.1（Write Gate 品質評分，0-1）
 
 ## 知識

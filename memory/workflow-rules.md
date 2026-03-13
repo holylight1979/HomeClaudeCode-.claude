@@ -24,10 +24,7 @@
 - 上版前先做秘密洩漏檢查
 
 ### 工作結束同步判斷
-1. 有 _AIDocs/ → 追加 _CHANGELOG.md（超 8 筆觸發滾動淘汰）
-2. 有新知識/決策 → 更新 atom 檔（知識段落 + Last-used）
-3. 有 .git/ → 完整 GIT 流程
-4. 有 .svn/ → 完整 SVN 流程
+→ 詳見 `rules/sync-workflow.md`（同步條件表 + Guardian 閘門）
 
 ### SVN 更新優先規則
 

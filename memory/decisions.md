@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 全域決策, 工具, 工作流, workflow, guardian, hooks, MCP, 記憶系統
 - Last-used: 2026-03-13
-- Confirmations: 39
+- Confirmations: 41
 - Type: decision
 
 ## 知識
@@ -39,12 +39,12 @@
 
 ### 基礎設施
 - [固] Vector Service @ localhost:3849 | Dashboard @ localhost:3848
-- [固] Ollama models: qwen3-embedding（embedding）+ qwen3:1.7b（萃取/分類）
+- [固] Ollama Dual-Backend: rdchat qwen3.5（主力萃取, pri=1）+ local qwen3:1.7b（fallback, pri=2）+ qwen3-embedding（embedding）
 - [固] Vector DB: LanceDB（此電腦支援 AVX2，LanceDB 效能穩定）
 - [固] search_min_score: 0.65（完整版 embedding 精確度足夠）
 - [固] MCP 傳輸格式：JSONL，protocolVersion 2025-11-25
 - [固] _call_ollama_generate: num_predict=2048, timeout=120s（qwen3 thinking mode 需 ~30s on GTX 1050 Ti）
-- [固] V2.4 萃取改用 extract-worker.py 獨立子 process（hook 有 3s timeout，萃取需 ~30s）
+- [固] SessionEnd 萃取由 extract-worker.py detached subprocess 執行（hook timeout=30s，萃取需 ~60s）
 
 ### 自我迭代（V2.6→V2.11）
 - [固] V2.11: 精簡為 3 條核心原則：品質函數（Hook）、證據門檻（Claude）、震盪偵測（Hook）
@@ -90,18 +90,7 @@
 
 ## 演化日誌
 
-- 2026-03-05: 合併自家中 V2.4 — 帶入回應捕獲、跨 Session 鞏固、episodic 改進
-- 2026-03-05: Vector DB 保留 LanceDB（此電腦支援 AVX2），embedding 保留 qwen3-embedding 完整版
-- 2026-03-05: search_min_score 保持 0.65（完整版 embedding 不需降低）
-- 2026-03-05: 6 hook 事件（不含 PreToolUse），indexer.py 加入 additional_atom_dirs + episodic/ 子目錄掃描
-- 2026-03-05: fix: workflow-guardian stdout/stderr 強制 UTF-8（Windows cp950 導致中文亂碼）
-- 2026-03-05: feat: 專案級 episodic（CWD 對應 project 層時，episodic 存到該 project memory）
-- 2026-03-05: fix: _call_ollama_generate num_predict 500→2048, timeout 3→120s（qwen3 thinking mode 修復）
-- 2026-03-06: fix: V2.4 萃取改用 detached subprocess（extract-worker.py），解決 sys.exit + hook 3s timeout 雙殺問題，萃取首次成功
-- 2026-03-06: feat: V2.5 寫入品質強化 — 萃取 prompt 重寫（可操作性標準）、6 知識類型、150 chars 上限、format:json、Write Gate 可操作性評分、CJK patterns
-- 2026-03-11: feat: V2.8 升級完成（3 sessions）— Wisdom Engine + 自我迭代 V2.6 + 品質回饋 V2.7 + Guardian 增量合併 + SPEC/文件全面更新
-- 2026-03-11: feat: V2.9 S2 — Related-Edge Spreading（多跳檢索 depth=1）+ ACT-R Activation Scoring（時間加權排序 + .access.json）
-- 2026-03-11: feat: V2.9 S3 完成 — 整合測試通過 + SPEC §十四 + 版號升級 V2.8→V2.9
-- 2026-03-11: feat: V2.10 — Session 全軌跡追蹤（Read Tracking + VCS Query Capture + 閱讀軌跡 section + 純閱讀 episodic + _staging 暫存區管理）
-- 2026-03-13: feat: 引入同事改進 — indexer.py 遞迴掃描所有層（子目錄 atom 可被索引）+ /upgrade skill（環境升級比對工具）
-- 2026-03-13: feat: V2.11 全面升級（4 波 10 sessions）— 精簡（砍逐輪萃取/因果圖/自動晉升/自我迭代8→3）+ 品質（衝突偵測/反思校準/Atom健康度）+ 模組化（rules/+Context Budget）+ 環境清理
+- 2026-03-05: 初始建立 — V2.4 合併（回應捕獲/鞏固/episodic）+ LanceDB + Dual-Backend
+- 2026-03-11: V2.8→V2.10 — Wisdom Engine + 檢索強化(ACT-R/Spreading) + Session 全軌跡追蹤
+- 2026-03-13: V2.11 全面升級 — 精簡（砍逐輪萃取/因果圖/自動晉升/迭代8→3）+ 品質（衝突偵測/反思校準）+ 模組化（rules/+Context Budget）
+- 2026-03-13: 自檢修復 — 清除因果圖殘留 + Context Budget 動態化 + 索引同步 + atom 去重 + extract-worker 啟用

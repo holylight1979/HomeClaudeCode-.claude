@@ -1,8 +1,10 @@
----
-name: gdoc-harvester
-description: Web Harvester 收割工具經驗 — Playwright + Chrome，支援 Google Docs/Sheets/Slides + GitLab/GitHub + 通用網頁
-type: project
----
+# gdoc-harvester — Web Harvester 收割工具經驗
+
+- Scope: global
+- Confidence: [觀]
+- Trigger: harvester, Google Docs, Sheets, 收割, Playwright, cookie, export
+- Last-used: 2026-03-13
+- Confirmations: 6
 
 ## Web Harvester
 
@@ -22,9 +24,7 @@ type: project
 
 4. **`page.evaluate` + `fetch()` 被 CORS 擋** — Google export redirect 跨域
 
-5. ~~**aiohttp cookie 同步不足**~~ — 已淘汰，aiohttp 已完全移除
-
-6. **framenavigated race condition** — 同一 doc_id 多次觸發
+5. **framenavigated race condition** — 同一 doc_id 多次觸發
    - 解法: `on_page_navigate` 在第一個 await 前 `visited.add(url_key)` 佔位
 
 7. **capture_doc/sheet 自殺 bug** — on_page_navigate 已加 visited，capture 又 `if in visited: return`
