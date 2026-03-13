@@ -16,10 +16,11 @@ import json
 import re
 import sys
 import time
-import urllib.request
-import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from ollama_client import get_client
 
 CLAUDE_DIR = Path.home() / ".claude"
 COLLECTION_NAME = "atom_memory"
@@ -296,33 +297,18 @@ def parse_and_chunk(
 
 
 class OllamaEmbedder:
-    """Embedding via Ollama HTTP API."""
+    """Embedding via dual-backend Ollama client."""
 
-    def __init__(self, model: str = "qwen3-embedding", base_url: str = "http://127.0.0.1:11434"):
-        self.model = model
-        self.base_url = base_url.rstrip("/")
+    def __init__(self):
+        self._client = get_client()
         self._dimension: Optional[int] = None
 
     def is_available(self) -> bool:
-        try:
-            req = urllib.request.Request(f"{self.base_url}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.status == 200
-        except Exception:
-            return False
+        return self._client.is_available("embedding")
 
     def embed(self, texts: List[str]) -> List[List[float]]:
-        """Embed a batch of texts. Ollama /api/embed supports batch."""
-        payload = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.base_url}/api/embed",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read())
-        embeddings = result.get("embeddings", [])
+        """Embed a batch of texts via OllamaClient."""
+        embeddings = self._client.embed(texts)
         if embeddings and self._dimension is None:
             self._dimension = len(embeddings[0])
         return embeddings
@@ -330,7 +316,6 @@ class OllamaEmbedder:
     @property
     def dimension(self) -> int:
         if self._dimension is None:
-            # Probe with a dummy text
             vecs = self.embed(["test"])
             if vecs:
                 self._dimension = len(vecs[0])
@@ -386,10 +371,7 @@ def create_embedder(config: Dict[str, Any]) -> Any:
     """Create embedder based on config, with fallback."""
     backend = config.get("embedding_backend", "ollama")
     if backend == "ollama":
-        emb = OllamaEmbedder(
-            model=config.get("embedding_model", "qwen3-embedding"),
-            base_url=config.get("ollama_base_url", "http://127.0.0.1:11434"),
-        )
+        emb = OllamaEmbedder()
         if emb.is_available():
             return emb
         # Fallback

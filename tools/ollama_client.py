@@ -1,0 +1,564 @@
+"""
+ollama_client.py — Dual-Backend Ollama Client
+
+統一所有 Ollama 呼叫，支援 primary (rdchat) + fallback (local) 自動切換。
+三階段退避：正常 → 短DIE (60s) → 長DIE (等到下一個 6h 時間段)。
+
+純 stdlib，不引入新依賴。
+"""
+
+import json
+import logging
+import ssl
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("ollama_client")
+
+CLAUDE_DIR = Path.home() / ".claude"
+CONFIG_PATH = CLAUDE_DIR / "workflow" / "config.json"
+TOKEN_PATH = CLAUDE_DIR / "workflow" / ".rdchat_token.json"
+
+# Health check cache TTL
+HEALTH_TTL = 60  # seconds
+
+# Short DIE: fallback 後 60s 重試
+SHORT_DIE_COOLDOWN = 60  # seconds
+
+# Long DIE: 10 分鐘內 2 次短DIE → 等到下一個時間段
+LONG_DIE_WINDOW = 600  # 10 minutes
+
+# 時間段邊界（每天 4 個）
+TIME_BOUNDARIES = [0, 6, 12, 18]
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class OllamaBackend:
+    name: str
+    base_url: str  # e.g. "https://rdchat.uj.com.tw/ollama" or "http://127.0.0.1:11434"
+    auth: Optional[Dict[str, str]] = None  # {"type", "login_url", "user", ...}
+    llm_model: Optional[str] = None
+    embedding_model: Optional[str] = None
+    priority: int = 99
+
+
+@dataclass
+class BackendState:
+    status: str = "normal"  # "normal" | "short_die" | "long_die"
+    consecutive_failures: int = 0
+    last_failure_at: float = 0.0
+    short_die_count: int = 0
+    first_short_die_at: float = 0.0
+    long_die_until: Optional[float] = None
+
+
+# ---------------------------------------------------------------------------
+# OllamaClient
+# ---------------------------------------------------------------------------
+
+class OllamaClient:
+
+    def __init__(self, backends: List[OllamaBackend]):
+        self._backends = sorted(backends, key=lambda b: b.priority)
+        self._health_cache: Dict[str, Tuple[bool, float]] = {}
+        self._token_cache: Dict[str, str] = {}
+        self._state: Dict[str, BackendState] = {}
+        # 載入已快取的 token
+        self._load_cached_tokens()
+
+    # -----------------------------------------------------------------------
+    # Public API
+    # -----------------------------------------------------------------------
+
+    def generate(self, prompt: str, model: str = None,
+                 timeout: int = 120, format: str = None, **options) -> str:
+        """POST /api/generate — 替換 workflow-guardian + extract-worker"""
+        backend = self._pick_backend("llm")
+        if not backend:
+            return ""
+        payload: Dict[str, Any] = {
+            "model": model or backend.llm_model,
+            "prompt": prompt,
+            "stream": False,
+        }
+        if format:
+            payload["format"] = format
+        if options:
+            payload["options"] = options
+        result = self._request_with_failover(
+            "llm", "/api/generate", payload, timeout
+        )
+        if result is None:
+            return ""
+        return result.get("response", "")
+
+    def chat(self, messages: List[Dict[str, str]], system: str = "",
+             model: str = None, timeout: int = 30) -> str:
+        """POST /api/chat — 替換 reranker + conflict-detector"""
+        msgs = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.extend(messages)
+        backend = self._pick_backend("llm")
+        if not backend:
+            return ""
+        payload = {
+            "model": model or backend.llm_model,
+            "messages": msgs,
+            "stream": False,
+        }
+        result = self._request_with_failover(
+            "llm", "/api/chat", payload, timeout
+        )
+        if result is None:
+            return ""
+        return result.get("message", {}).get("content", "")
+
+    def embed(self, texts: List[str], model: str = None,
+              timeout: int = 60) -> List[List[float]]:
+        """POST /api/embed — 替換 OllamaEmbedder"""
+        backend = self._pick_backend("embedding")
+        if not backend:
+            return []
+        payload = {
+            "model": model or backend.embedding_model,
+            "input": texts,
+        }
+        result = self._request_with_failover(
+            "embedding", "/api/embed", payload, timeout
+        )
+        if result is None:
+            return []
+        return result.get("embeddings", [])
+
+    def is_available(self, need: str = "llm") -> bool:
+        """Check if any backend with the needed capability is reachable."""
+        return self._pick_backend(need) is not None
+
+    # -----------------------------------------------------------------------
+    # Request with failover
+    # -----------------------------------------------------------------------
+
+    def _request_with_failover(self, need: str, endpoint: str,
+                               payload: dict, timeout: int) -> Optional[dict]:
+        """Try backends in priority order, with failover on failure."""
+        tried = set()
+        while True:
+            backend = self._pick_backend(need, exclude=tried)
+            if not backend:
+                return None
+            tried.add(backend.name)
+            result = self._do_request(backend, endpoint, payload, timeout)
+            if result is not None:
+                self._record_success(backend)
+                return result
+            self._record_failure(backend)
+
+    def _do_request(self, backend: OllamaBackend, endpoint: str,
+                    payload: dict, timeout: int) -> Optional[dict]:
+        """Single request attempt to one backend."""
+        url = backend.base_url.rstrip("/") + endpoint
+        data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+
+        # Auth
+        if backend.auth:
+            token = self._ensure_auth(backend)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        try:
+            ctx = None
+            if url.startswith("https"):
+                ctx = ssl.create_default_context()
+                # 公司內網可能自簽憑證
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                return json.loads(resp.read())
+
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and backend.auth:
+                # Token 過期，重新登入一次
+                logger.info("[%s] 401, re-authenticating...", backend.name)
+                self._token_cache.pop(backend.name, None)
+                token = self._ensure_auth(backend, force=True)
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    try:
+                        req2 = urllib.request.Request(url, data=data, headers=headers, method="POST")
+                        with urllib.request.urlopen(req2, timeout=timeout, context=ctx) as resp2:
+                            return json.loads(resp2.read())
+                    except Exception:
+                        pass
+            logger.warning("[%s] HTTP %s: %s", backend.name, e.code, endpoint)
+            return None
+        except Exception as e:
+            logger.warning("[%s] %s: %s", backend.name, type(e).__name__, e)
+            return None
+
+    # -----------------------------------------------------------------------
+    # Backend selection with 3-stage backoff
+    # -----------------------------------------------------------------------
+
+    def _pick_backend(self, need: str, exclude: set = None) -> Optional[OllamaBackend]:
+        """Pick the best available backend for the given need."""
+        now = time.time()
+        exclude = exclude or set()
+
+        for backend in self._backends:
+            if backend.name in exclude:
+                continue
+
+            # Check capability
+            if need == "embedding" and not backend.embedding_model:
+                continue
+            if need == "llm" and not backend.llm_model:
+                continue
+
+            state = self._get_state(backend)
+
+            # Long DIE: skip until time boundary
+            if state.status == "long_die":
+                if state.long_die_until and now < state.long_die_until:
+                    continue
+                # Time boundary reached — reset to normal
+                logger.info("[%s] long_die expired, resetting to normal", backend.name)
+                self._reset_state(backend)
+
+            # Short DIE: skip if within cooldown
+            if state.status == "short_die":
+                if (now - state.last_failure_at) < SHORT_DIE_COOLDOWN:
+                    continue
+                # Cooldown passed — try again
+
+            # Health check (cached)
+            cached = self._health_cache.get(backend.name)
+            if cached:
+                healthy, ts = cached
+                if (now - ts) < HEALTH_TTL:
+                    if healthy:
+                        return backend
+                    continue  # known unhealthy within TTL
+
+            # Actual health check
+            healthy = self._check_health(backend)
+            self._health_cache[backend.name] = (healthy, now)
+            if healthy:
+                return backend
+
+        return None
+
+    def _record_success(self, backend: OllamaBackend):
+        """Any success resets state to normal."""
+        state = self._get_state(backend)
+        if state.status != "normal":
+            logger.info("[%s] recovered → normal", backend.name)
+        self._reset_state(backend)
+        # Also refresh health cache
+        self._health_cache[backend.name] = (True, time.time())
+
+    def _record_failure(self, backend: OllamaBackend):
+        """Record a failure and possibly escalate state."""
+        now = time.time()
+        state = self._get_state(backend)
+        state.consecutive_failures += 1
+        state.last_failure_at = now
+
+        # Invalidate health cache
+        self._health_cache[backend.name] = (False, now)
+
+        if state.consecutive_failures >= 2 and state.status == "normal":
+            # → short_die
+            state.status = "short_die"
+            state.short_die_count += 1
+            if state.first_short_die_at == 0:
+                state.first_short_die_at = now
+            logger.info("[%s] → short_die (#%d)", backend.name, state.short_die_count)
+
+            # Check long_die escalation
+            if state.short_die_count >= 2:
+                if (now - state.first_short_die_at) <= LONG_DIE_WINDOW:
+                    state.status = "long_die"
+                    state.long_die_until = _next_time_boundary()
+                    until_str = datetime.fromtimestamp(state.long_die_until).strftime("%H:%M")
+                    logger.warning("[%s] → long_die until %s", backend.name, until_str)
+                else:
+                    # 10-minute window expired, reset short_die counters
+                    state.short_die_count = 1
+                    state.first_short_die_at = now
+
+        elif state.consecutive_failures >= 2 and state.status == "short_die":
+            # Already in short_die, check if should escalate
+            state.short_die_count += 1
+            if state.short_die_count >= 2:
+                if (now - state.first_short_die_at) <= LONG_DIE_WINDOW:
+                    state.status = "long_die"
+                    state.long_die_until = _next_time_boundary()
+                    until_str = datetime.fromtimestamp(state.long_die_until).strftime("%H:%M")
+                    logger.warning("[%s] → long_die until %s", backend.name, until_str)
+
+    def _get_state(self, backend: OllamaBackend) -> BackendState:
+        if backend.name not in self._state:
+            self._state[backend.name] = BackendState()
+        return self._state[backend.name]
+
+    def _reset_state(self, backend: OllamaBackend):
+        self._state[backend.name] = BackendState()
+
+    # -----------------------------------------------------------------------
+    # Health check
+    # -----------------------------------------------------------------------
+
+    def _check_health(self, backend: OllamaBackend) -> bool:
+        """GET /api/tags — lightweight health check."""
+        url = backend.base_url.rstrip("/") + "/api/tags"
+        headers = {}
+        if backend.auth:
+            token = self._ensure_auth(backend)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        try:
+            ctx = None
+            if url.startswith("https"):
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    # -----------------------------------------------------------------------
+    # Auth / Token management
+    # -----------------------------------------------------------------------
+
+    def _ensure_auth(self, backend: OllamaBackend, force: bool = False) -> Optional[str]:
+        """Get auth token — from cache, file, or fresh login."""
+        if not backend.auth:
+            return None
+
+        # Memory cache
+        if not force and backend.name in self._token_cache:
+            return self._token_cache[backend.name]
+
+        # File cache
+        if not force:
+            token = self._load_token_from_file(backend.name)
+            if token:
+                self._token_cache[backend.name] = token
+                return token
+
+        # Login
+        auth = backend.auth
+        if auth.get("type") == "bearer_ldap":
+            token = self._ldap_login(auth)
+            if token:
+                self._token_cache[backend.name] = token
+                self._save_token_to_file(backend.name, token)
+                return token
+
+        return None
+
+    def _ldap_login(self, auth: dict) -> Optional[str]:
+        """POST to login_url with user/password, return JWT token."""
+        login_url = auth.get("login_url", "")
+        user = auth.get("user", "")
+        password = self._resolve_password(auth)
+        if not login_url or not user or not password:
+            logger.error("LDAP auth config incomplete")
+            return None
+
+        payload = json.dumps({"user": user, "password": password}).encode("utf-8")
+        try:
+            ctx = None
+            if login_url.startswith("https"):
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(
+                login_url, data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                data = json.loads(resp.read())
+                token = data.get("token")
+                if token:
+                    logger.info("LDAP login success: %s", user)
+                    return token
+        except Exception as e:
+            logger.error("LDAP login failed: %s", e)
+        return None
+
+    def _resolve_password(self, auth: dict) -> str:
+        """Resolve password from: password_file > password_env > password."""
+        import os
+        # password_file
+        pf = auth.get("password_file")
+        if pf:
+            path = Path(pf).expanduser()
+            if path.exists():
+                return path.read_text(encoding="utf-8").strip()
+        # password_env
+        pe = auth.get("password_env")
+        if pe:
+            val = os.environ.get(pe, "")
+            if val:
+                return val
+        # direct password (not recommended)
+        return auth.get("password", "")
+
+    def _load_token_from_file(self, backend_name: str) -> Optional[str]:
+        if TOKEN_PATH.exists():
+            try:
+                data = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+                if data.get("backend") == backend_name:
+                    return data.get("token")
+            except (json.JSONDecodeError, OSError):
+                pass
+        return None
+
+    def _save_token_to_file(self, backend_name: str, token: str):
+        try:
+            TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+            TOKEN_PATH.write_text(
+                json.dumps({
+                    "backend": backend_name,
+                    "token": token,
+                    "obtained_at": datetime.now().isoformat(),
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.warning("Failed to save token: %s", e)
+
+    def _load_cached_tokens(self):
+        if TOKEN_PATH.exists():
+            try:
+                data = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+                name = data.get("backend")
+                token = data.get("token")
+                if name and token:
+                    self._token_cache[name] = token
+            except (json.JSONDecodeError, OSError):
+                pass
+
+
+# ---------------------------------------------------------------------------
+# Time boundary helper
+# ---------------------------------------------------------------------------
+
+def _next_time_boundary() -> float:
+    """Return timestamp of the next 6h boundary (00:00/06:00/12:00/18:00)."""
+    now = datetime.now()
+    for h in TIME_BOUNDARIES:
+        t = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if t > now:
+            return t.timestamp()
+    # Next day 00:00
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return tomorrow.timestamp()
+
+
+# ---------------------------------------------------------------------------
+# Config loading + Singleton
+# ---------------------------------------------------------------------------
+
+_client_instance: Optional[OllamaClient] = None
+
+
+def _build_backends_from_config(config: dict) -> List[OllamaBackend]:
+    """Build backend list from config. Supports new and legacy formats."""
+    vs = config.get("vector_search", config)
+    backends_cfg = vs.get("ollama_backends", {})
+
+    if backends_cfg:
+        # New format
+        backends = []
+        for name, cfg in backends_cfg.items():
+            backends.append(OllamaBackend(
+                name=name,
+                base_url=cfg.get("base_url", "http://127.0.0.1:11434"),
+                auth=cfg.get("auth"),
+                llm_model=cfg.get("llm_model"),
+                embedding_model=cfg.get("embedding_model"),
+                priority=cfg.get("priority", 99),
+            ))
+        return backends
+
+    # Legacy format — single local backend
+    return [OllamaBackend(
+        name="local",
+        base_url=vs.get("ollama_base_url", "http://127.0.0.1:11434"),
+        auth=None,
+        llm_model=vs.get("ollama_llm_model", "qwen3:1.7b"),
+        embedding_model=vs.get("embedding_model", "qwen3-embedding"),
+        priority=1,
+    )]
+
+
+def get_client(config: dict = None) -> OllamaClient:
+    """Get or create singleton OllamaClient."""
+    global _client_instance
+    if _client_instance is not None:
+        return _client_instance
+
+    if config is None:
+        config = {}
+        if CONFIG_PATH.exists():
+            try:
+                config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    backends = _build_backends_from_config(config)
+    _client_instance = OllamaClient(backends)
+    return _client_instance
+
+
+def reset_client():
+    """Reset singleton (for testing)."""
+    global _client_instance
+    _client_instance = None
+
+
+# ---------------------------------------------------------------------------
+# Self-test
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
+    client = get_client()
+    print(f"Backends: {[b.name for b in client._backends]}")
+
+    # Test LLM
+    llm_be = client._pick_backend("llm")
+    print(f"LLM backend: {llm_be.name if llm_be else 'NONE'}")
+    if llm_be:
+        resp = client.generate("Reply with just the word 'OK'", timeout=30)
+        print(f"Generate test: {repr(resp[:100])}")
+
+    # Test embedding
+    emb_be = client._pick_backend("embedding")
+    print(f"Embedding backend: {emb_be.name if emb_be else 'NONE'}")
+    if emb_be:
+        vecs = client.embed(["hello world"])
+        if vecs:
+            print(f"Embed test: {len(vecs[0])} dims")
+        else:
+            print("Embed test: FAILED")
+
+    print("Done.")

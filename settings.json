@@ -103,7 +103,11 @@
       "Read(//root/.claude/memory/**)",
       "Read(//home/holylight/.claude/**)",
       "Read(//home/holylight/.claude/memory/**)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(cp /c/tmp/claudecode-agent-upgrade/commands/continue.md /c/Users/holylight/.claude/commands/)",
+      "Bash(cp /c/tmp/claudecode-agent-upgrade/BOOTSTRAP.md /c/Users/holylight/.claude/)",
+      "mcp__playwright__browser_network_requests",
+      "mcp__playwright__browser_evaluate"
     ],
     "additionalDirectories": [
       "C:\\Users\\holylight\\.claude",
@@ -190,5 +194,6 @@
       }
     ]
   },
-  "autoUpdatesChannel": "latest"
+  "autoUpdatesChannel": "latest",
+  "effortLevel": "max"
 }

@@ -26,6 +26,9 @@ from typing import Any, Dict, List, Optional
 CLAUDE_DIR = Path.home() / ".claude"
 WORKFLOW_DIR = CLAUDE_DIR / "workflow"
 
+sys.path.insert(0, str(CLAUDE_DIR / "tools"))
+from ollama_client import get_client
+
 VALID_TYPES = ("factual", "procedural", "architectural", "pitfall", "decision")
 
 
@@ -91,23 +94,13 @@ def _extract_all_assistant_texts(
 # ─── Ollama ───────────────────────────────────────────────────────────────────
 
 
-def _call_ollama(prompt: str, model: str = "qwen3:1.7b", timeout: int = 120) -> str:
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.1, "num_predict": 2048},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
+def _call_ollama(prompt: str, model: str = None, timeout: int = 120) -> str:
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            return data.get("response", "")
+        client = get_client()
+        return client.generate(
+            prompt, model=model, timeout=timeout,
+            format="json", temperature=0.1, num_predict=2048,
+        )
     except Exception:
         return ""
 

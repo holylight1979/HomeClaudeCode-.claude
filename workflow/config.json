@@ -17,6 +17,26 @@
     "fallback_model": "BAAI/bge-m3",
     "ollama_base_url": "http://127.0.0.1:11434",
     "ollama_llm_model": "qwen3:1.7b",
+    "ollama_backends": {
+      "rdchat": {
+        "base_url": "https://rdchat.uj.com.tw/ollama",
+        "auth": {
+          "type": "bearer_ldap",
+          "login_url": "https://rdchat.uj.com.tw/api/v1/auths/ldap",
+          "user": "holylight",
+          "password_file": "~/.claude/workflow/.rdchat_password"
+        },
+        "llm_model": "qwen3.5:latest",
+        "embedding_model": "qwen3-embedding",
+        "priority": 1
+      },
+      "local": {
+        "base_url": "http://127.0.0.1:11434",
+        "llm_model": "qwen3:1.7b",
+        "embedding_model": "qwen3-embedding",
+        "priority": 2
+      }
+    },
     "search_top_k": 5,
     "search_min_score": 0.65,
     "search_timeout_ms": 2000,

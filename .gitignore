@@ -1,6 +1,8 @@
 # ─── Credentials & Auth (NEVER commit) ───────────────────
 .credentials.json
 mcp-needs-auth-cache.json
+workflow/.rdchat_password
+workflow/.rdchat_token.json
 
 # ─── Runtime state (session-specific, auto-generated) ────
 backups/

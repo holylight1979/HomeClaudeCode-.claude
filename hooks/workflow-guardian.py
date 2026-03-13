@@ -24,6 +24,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+sys.path.insert(0, str(Path.home() / ".claude" / "tools"))
+from ollama_client import get_client
+
 # ─── V2.8: Wisdom Engine (lazy import, graceful fallback) ────────────────────
 try:
     from wisdom_engine import (
@@ -1652,30 +1655,19 @@ def _extract_all_assistant_texts(transcript_path: Path, max_chars: int = 20000) 
     return texts
 
 
-def _call_ollama_generate(prompt: str, model: str = "qwen3:1.7b",
+def _call_ollama_generate(prompt: str, model: str = None,
                           timeout: int = 120) -> str:
-    """Call Ollama generate API. Returns raw response text.
+    """Call Ollama generate API via dual-backend client.
 
     Default timeout=120s: qwen3 thinking mode needs ~30s on GTX 1050 Ti.
     Background threads (extraction) can afford to wait.
     """
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.1, "num_predict": 2048}
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            return data.get("response", "")
+        client = get_client()
+        return client.generate(
+            prompt, model=model, timeout=timeout,
+            format="json", temperature=0.1, num_predict=2048,
+        )
     except Exception:
         return ""
 
