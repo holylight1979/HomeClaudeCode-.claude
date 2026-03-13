@@ -44,19 +44,28 @@
 
 （記錄格式：{假設內容} → {實際情況}（發現於: {context}））
 
-（尚無記錄，使用中累積）
+- [臨] 假設「extract-worker.py 被 guardian spawn 為 detached subprocess」→ 實際上 guardian 從未呼叫 extract-worker，SessionEnd 萃取走的是 guardian 內建的 `_llm_extract_knowledge()`（發現於: 萃取管線診斷，grep 全 guardian 找不到 extract-worker 引用）
+- [臨] 假設「episodic 全域目錄空 = TTL 過期清理」→ 實際上 episodic 依 CWD 存到 project 層（projects/*/memory/episodic/），全域層空是正常行為（發現於: ls 各層 episodic 目錄）
+- [臨] 假設「architecture 0/6 = 架構任務做不好」→ 實際上分類邏輯是「修改 > 4 檔 = architecture」，跟真正的架構任務無關（發現於: 讀 wisdom_engine.py L134-139）
+
+### 靜默失敗（Silent Failure）
+
+（記錄格式：{看起來正常的行為} → {實際隱藏的問題} → {發現方式}（根因: {root cause}））
+
+- [臨] reflect() 在 SessionEnd 被呼叫但 exception 被外層 try/except 吞掉 → 所有 metrics（accuracy/over_engineering/silence）從未被更新，數據全部不可信 → 直接 `python -c` 呼叫 reflect() 才發現 KeyError（根因: silence_accuracy 的 key 從 V2.8→V2.11 改了名但 JSON 檔沒遷移，setdefault 不覆蓋既有值，拿到舊結構後存取新 key 爆 KeyError）
+- [臨] guardian `_call_ollama_generate` 沒傳 `think` 參數 + prompt 含 `/no_think` → qwen3.5 長 prompt 秒回空 `[]` → knowledge_queue 永遠空 → episodic atom 知識段只有 metadata → 看起來「正常產生了 episodic」但實際沒有任何萃取內容（根因: A/B 測試改了 extract-worker.py 但沒改真正在跑的 guardian 內建萃取路徑）
 
 ### 模式誤用（Pattern Misapplication）
 
 （記錄格式：{套用的模式} → {為什麼不適用}（應改用: {correct approach}））
 
-（尚無記錄，使用中累積）
+- [臨] 用「修改檔案數量」作為「任務複雜度/類型」的 proxy → 一個重命名跨 6 檔也算 architecture，一個真正的架構設計只改 1 檔卻算 single_file → 改用 Wisdom classify_situation 的 approach 結果（plan=architecture）（應改用: 語意層判斷而非數量代理）
 
 ### 生成品質回饋（Output Quality Feedback）
 
 （記錄格式：{生成內容描述} → {被重寫/修正的部分} → {重寫原因}（品質訊號: −））
 
-（尚無記錄，使用中累積）
+- [臨] AI 診斷萃取問題時反覆說「think=False 會失敗」但沒說清楚為什麼是 False → 使用者無法理解因果鏈 → 根因是沒區分「哪個檔案真正在跑」vs「哪個檔案被測試過」（品質訊號: 使用者說「看不懂你在說什麼」「在打轉」）
 
 ## 行動
 
@@ -74,3 +83,4 @@
 |------|------|------|
 | 2026-03-10 | 初始建立：四大分類（環境踩坑/假設錯誤/模式誤用/品質回饋）+ 2 條已知踩坑 | manual |
 | 2026-03-10 | [觀]→[固] 晉升（Confirmations=6）+ 新增 rmSync CJK 踩坑 | atomic-memory E2E |
+| 2026-03-13 | 新增：假設錯誤 3 條 + 靜默失敗 2 條 + 模式誤用 1 條 + 品質回饋 1 條 | 萃取管線診斷 session |
