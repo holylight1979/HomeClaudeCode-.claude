@@ -6,6 +6,7 @@
 
 | 日期 | 變更 | 涉及檔案 |
 |------|------|---------|
+| 2026-03-13 | **/read-project**: 新增 DocIndex-System.md（76 檔系統索引）+ doc-index-system atom | `_AIDocs/DocIndex-System.md`, `memory/doc-index-system.md`, `memory/MEMORY.md` |
 | 2026-03-13 | **選擇性 cherry-pick**：從來源 V2.10 合併 `/continue` skill + `/resume` staging 安全網 + `BOOTSTRAP.md` + `workflow-rules.md` 補回大型計畫/GIT/同步判斷段落 | `commands/continue.md`, `commands/resume.md`, `BOOTSTRAP.md`, `memory/workflow-rules.md` |
 | 2026-03-13 | **Atom 整理**：SPEC(950行)/self-iteration/v3-design-spec/v3-research 移至 `memory/_reference/`，MEMORY.md 索引 13→8 筆，新增「參考文件」區塊（開發記憶系統時手動讀取） | `memory/MEMORY.md`, `memory/_reference/*` |
 | 2026-03-13 | **README Token/延遲表校正**：CLAUDE.md Token 2500-3500→1500-2500、MEMORY.md Token 50-80→200-350、Prompt 延遲 300-600→200-500ms（V2.11 移除逐輪萃取）、總 Overhead 3000-5000→2000-5500；子系統描述同步（Self-Iteration 8→3 條、Wisdom 因果圖移除、Response Capture 逐輪萃取移除）；架構樹行數校正 | `README.md` |
