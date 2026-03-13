@@ -82,9 +82,14 @@ class OllamaClient:
     # -----------------------------------------------------------------------
 
     def generate(self, prompt: str, model: str = None,
-                 timeout: int = 120, format: str = None, **options) -> str:
-        """LLM text generation. Internally uses /api/chat + think:false
-        to avoid thinking-mode token waste on qwen3/3.5 models."""
+                 timeout: int = 120, format: str = None,
+                 think: bool = False, **options) -> str:
+        """LLM text generation. Internally uses /api/chat.
+
+        think=False (default): fast, no reasoning tokens — 適合短 prompt.
+        think=True: 啟用 reasoning，適合長 prompt 萃取等需要深度處理的場景。
+        不支援 think 的模型（如 qwen3:1.7b）會自動忽略此參數。
+        """
         backend = self._pick_backend("llm")
         if not backend:
             return ""
@@ -92,7 +97,7 @@ class OllamaClient:
             "model": model or backend.llm_model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "think": False,
+            "think": think,
         }
         if format:
             payload["format"] = format

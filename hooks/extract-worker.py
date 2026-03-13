@@ -97,10 +97,12 @@ def _extract_all_assistant_texts(
 def _call_ollama(prompt: str, model: str = None, timeout: int = 120) -> str:
     try:
         client = get_client()
-        # 不用 format="json" — qwen3.5 thinking mode 與 JSON constrained decoding 衝突
+        # think=True: qwen3.5 需要 reasoning 才能正確處理長 prompt 萃取
+        # qwen3:1.7b 不支援 think，自動忽略
+        # num_predict=8192: 給 thinking tokens 足夠空間（qwen3.5 thinking ~3K + content ~500）
         return client.generate(
             prompt, model=model, timeout=timeout,
-            temperature=0.1, num_predict=2048,
+            think=True, temperature=0.1, num_predict=8192,
         )
     except Exception:
         return ""
