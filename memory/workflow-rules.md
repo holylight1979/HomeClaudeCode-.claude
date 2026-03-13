@@ -3,14 +3,31 @@
 - Scope: global
 - Confidence: [固]
 - Type: procedural
-- Trigger: svn, svn-update, 版本控制, 同步, vcs
+- Trigger: 工作流程, 大型任務, 分階段, SOP, 任務拆分, 上版, GIT, svn, svn-update, 版本控制, 同步, vcs
 - Last-used: 2026-03-12
 - Created: 2026-03-06
 - Confirmations: 16
 - Tags: workflow, svn, vcs
-- Related: (none)
+- Related: decisions
 
 ## 知識
+
+### 大型計畫執行
+- 分階段 session 執行
+- 每階段：完成 → 驗證 → 上傳 GIT → 提供下一階段 prompt 給使用者
+- **「執驗上P」**：階段收尾口令，等同 執行 → 驗證 → 上 GIT → 產 Prompt（四步都做完）
+- 有順序依賴的任務（分析→計畫→執行）應在同一對話完成
+- 獨立子任務可安全新開對話（MEMORY.md 會自動載入）
+
+### GIT 流程
+- 「上 GIT」= git add + commit + push（三步都做完）
+- 上版前先做秘密洩漏檢查
+
+### 工作結束同步判斷
+1. 有 _AIDocs/ → 追加 _CHANGELOG.md（超 8 筆觸發滾動淘汰）
+2. 有新知識/決策 → 更新 atom 檔（知識段落 + Last-used）
+3. 有 .git/ → 完整 GIT 流程
+4. 有 .svn/ → 完整 SVN 流程
 
 ### SVN 更新優先規則
 
@@ -35,6 +52,9 @@
 
 ## 行動
 
+- 大型任務主動拆分多個 session 階段，每階段結束提供延續 prompt
+- 批量修改先確認 1-2 個模式正確，再批量執行
+- Token 節省：有 _AIDocs 文件的不重新掃描原始碼，直接引用文件
 - 首次 Edit/Write 原始碼前，檢查 `.svn/` 存在 + session 內未 update → 簡短詢問
 - 詢問格式簡潔：「要先 svn update 嗎？」
 - 使用者拒絕 → 記錄已詢問，不再重複
@@ -45,3 +65,4 @@
 | 日期 | 變更 | 來源 |
 |------|------|------|
 | 2026-03-06 | 建立為 [固]（使用者明確要求） | session:SVN 工作流規則建立 |
+| 2026-03-13 | 合併來源 V2.10 的大型計畫/GIT/同步判斷段落 + 擴展 Trigger | session:選擇性 cherry-pick |

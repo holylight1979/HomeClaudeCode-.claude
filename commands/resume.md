@@ -113,6 +113,13 @@ $ARGUMENTS
 
 等待使用者選擇。如果使用者要修改 prompt 內容，根據回饋調整後再次確認。
 
+## Step 4.5: 存入 Staging（安全網）
+
+使用者確認 prompt 後，先寫入 `memory/_staging/next-phase.md`（確保目錄存在）。
+若檔案已存在，顯示舊內容第一行並詢問是否覆蓋。
+
+這樣即使後續 MCP 自動化失敗，使用者仍可透過 `/clear` → `/continue` 銜接。
+
 ## Step 5: 執行
 
 ### 5.0 前置準備
@@ -236,10 +243,10 @@ rm ~/.claude/memory/_staging/_resume_prompt.txt
 根據執行結果回報：
 
 **自動化成功（A/B/C）**：
-> 「✅ 新 session 已啟動，續接 prompt 已自動貼上執行。你可以切換到新視窗/tab 查看進度。」
+> 「✅ 新 session 已啟動。續接 prompt 也已存入 staging 備份。」
 
 **自動化失敗，降級為手動**：
-> 「⚠ 自動開啟失敗。續接 prompt 已複製到剪貼簿，請手動開新 session 後 Ctrl+V 貼上。」
+> 「⚠ 自動開啟失敗。續接 prompt 已存入 staging，請 `/clear` → `/continue` 銜接。」
 
 **手動模式（D）**：
-> 「📋 續接 prompt 已複製到剪貼簿。請開新 session 後 Ctrl+V 貼上執行。」
+> 「📋 續接 prompt 已複製到剪貼簿，也已存入 staging。可 `/clear` → `/continue` 或手動貼上。」
