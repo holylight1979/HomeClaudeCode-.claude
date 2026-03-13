@@ -10,7 +10,7 @@
 ## 知識
 
 ### 核心架構
-- [固] 原子記憶 V2.9：Hybrid RECALL + Ranked Search + 回應捕獲 + 跨 Session 鞏固 + Write Gate + 自我迭代 + Wisdom Engine + 檢索強化（Project-Aliases / Related-Edge Spreading / ACT-R Activation / Blind-Spot Reporter）
+- [固] 原子記憶 V2.11：Hybrid RECALL + Ranked Search + 回應捕獲（僅 SessionEnd）+ 跨 Session 鞏固（簡化計數）+ Write Gate + 自我迭代（3 條精簡）+ Wisdom Engine（硬規則+反思校準）+ 檢索強化 + Context Budget + 衝突偵測 + Atom 健康度
 - [固] 雙 LLM：Claude Code（雲端決策）+ Ollama qwen3（本地語意處理）
 - [固] 6 hook 事件全由 workflow-guardian.py 統一處理（SessionStart/UserPromptSubmit/PostToolUse/PreCompact/Stop/SessionEnd）
 
@@ -19,18 +19,17 @@
 - [固] 降級順序：Ollama 不可用 → 純 keyword | Vector Service 掛 → graceful fallback
 - [固] 索引 2 層：global → project（向量發現），所有層統一 `**/*.md` 遞迴掃描 + `_` 前綴目錄跳過
 
-### 回應捕獲（V2.4→V2.5 強化）
-- [固] 逐輪萃取：UserPromptSubmit 非同步讀取上一輪 assistant 回應，qwen3:1.7b 萃取知識（≤3000 chars, 2 items）
-- [固] SessionEnd 補漏：同步掃描全 transcript（≤20000 chars, 5 items）
-- [固] 萃取結果一律 [臨]，經跨 Session 鞏固後自動晉升
-- [固] V2.5: 萃取 prompt 加入可操作性標準（actionable + specific + reusable）+ negative examples
-- [固] V2.5: 知識類型 4→6（+decision, +preference），content 上限 80→150 chars
-- [固] V2.5: Ollama API 加 format:json（減少 JSON 解析失敗），dedup 前綴 40→60 chars
-- [固] V2.5: Write Gate 加入可操作性評分（+0.15），CJK-aware patterns（中文無空格）
+### 回應捕獲（V2.4→V2.11）
+- [固] V2.11: 廢除逐輪萃取（per_turn_enabled: false），僅保留 SessionEnd 全 transcript 萃取
+- [固] V2.11: 情境感知萃取（依 session intent 調整 prompt：build/debug/design/recall）
+- [固] V2.11: 跨 Session 觀察（vector search top_k=5, min_score=0.75 → 2+ sessions 命中生成觀察段落）
+- [固] SessionEnd 萃取：同步掃描全 transcript（≤20000 chars, 5 items）
+- [固] 萃取結果一律 [臨]，由 Confirmations 計數驅動後續晉升
+- [固] V2.5: 萃取 prompt 可操作性標準、知識類型 6 種、format:json、Write Gate CJK-aware
 
-### 跨 Session 鞏固（V2.4 Phase 3）
-- [固] SessionEnd 時對 knowledge_queue 做向量搜尋（min_score 0.75）
-- [固] 2+ sessions 命中 → 自動晉升 [臨]→[觀]；4+ sessions → 建議晉升 [觀]→[固]
+### 跨 Session 鞏固（V2.4→V2.11 簡化）
+- [固] V2.11: 廢除自動晉升 [臨]→[觀]，改為 Confirmations +1 簡單計數
+- [固] 4+ sessions 命中 → 建議晉升（不自動執行），統一 dedup 閾值 0.80
 - [固] 結果寫入 episodic atom「跨 Session 觀察」段落
 
 ### Episodic atom
@@ -47,19 +46,24 @@
 - [固] _call_ollama_generate: num_predict=2048, timeout=120s（qwen3 thinking mode 需 ~30s on GTX 1050 Ti）
 - [固] V2.4 萃取改用 extract-worker.py 獨立子 process（hook 有 3s timeout，萃取需 ~30s）
 
-### 自我迭代（V2.6）
-- [固] 8 條核心規則：品質函數、收斂優先、證據門檻、淘汰勇氣、震盪偵測、成熟度感知、三維平衡、演進邊界
-- [固] 定期檢閱：SessionStart 檢查 episodic 計數 → 提醒掃描近期 patterns → 收攏為 [觀]/[固]
+### 自我迭代（V2.6→V2.11）
+- [固] V2.11: 精簡為 3 條核心原則：品質函數（Hook）、證據門檻（Claude）、震盪偵測（Hook）
+- [固] 定期檢閱：SessionStart 檢查 episodic 計數 → 提醒掃描近期 patterns
 
-### 品質回饋與成熟度（V2.7）
-- [固] Output quality check（PostToolUse）、iteration metrics（SessionEnd）、oscillation detection、maturity phase
-- [固] 成熟度三階段：learning(<15) → stable(15-50) → mature(>50)，依 episodic 數量判斷
+### Wisdom Engine（V2.8→V2.11）
+- [固] V2.11: 移除因果圖（CausalGraph class + causal_graph.json），冷啟動零邊，維護成本>收益
+- [固] V2.11: 情境分類器改為 2 條硬規則（file_count+is_feature → confirm; touches_arch+file_count → plan）
+- [固] V2.11: 反思引擎新增 over_engineering_rate（同檔 Edit 2+ 次）+ silence_accuracy（held_back 追蹤）
+- [固] V2.11: Bayesian 權重校準（architecture 連續 3+ 失敗 → 提升 arch 敏感度）
+- [固] guardian lazy import + graceful fallback，冷啟動零 token，注入上限 ≤90 tokens
 
-### Wisdom Engine（V2.8）
-- [固] 三力架構：因果圖（BFS depth=2）+ 情境分類器（加權評分）+ 反思引擎（滑動窗口統計）
-- [固] wisdom_engine.py ~250 行，guardian lazy import + graceful fallback
-- [固] 冷啟動零 token，注入上限 ≤90 tokens
-- [固] 因果圖 Bayesian 更新：hit → ×0.9+0.1, miss → ×0.95, <0.3 自動移除
+### V2.11 新增機制
+- [固] Context Budget：additionalContext 硬上限 3000 tokens，超額按 ACT-R activation 由低到高 truncate
+- [固] 衝突偵測自動化：SessionEnd 對修改 atoms 做向量搜尋（score 0.60-0.95），寫入 episodic 衝突警告
+- [固] PostToolUse 品質追蹤：同檔 Edit 2+ 次 → reverted_count，SessionEnd 寫入 reflection_metrics
+- [固] Atom 健康度工具：atom-health-check.py（Related 完整性 + 懸空引用清除 + 過期掃描）
+- [固] .claude/rules/ 模組化：CLAUDE.md 瘦身至 ~50 行，4 個規則檔自動載入
+- [固] 環境清理：shell-snapshots/debug/workflow 300+ 垃圾檔案清除 + cleanup-old-files.py 定期工具
 
 ### 記憶檢索強化（V2.9）
 - [固] Project-Aliases：MEMORY.md 加 `> Project-Aliases:` 行，跨專案掃描先比對 aliases → 注入全文
@@ -100,3 +104,4 @@
 - 2026-03-11: feat: V2.9 S3 完成 — 整合測試通過 + SPEC §十四 + 版號升級 V2.8→V2.9
 - 2026-03-11: feat: V2.10 — Session 全軌跡追蹤（Read Tracking + VCS Query Capture + 閱讀軌跡 section + 純閱讀 episodic + _staging 暫存區管理）
 - 2026-03-13: feat: 引入同事改進 — indexer.py 遞迴掃描所有層（子目錄 atom 可被索引）+ /upgrade skill（環境升級比對工具）
+- 2026-03-13: feat: V2.11 全面升級（4 波 10 sessions）— 精簡（砍逐輪萃取/因果圖/自動晉升/自我迭代8→3）+ 品質（衝突偵測/反思校準/Atom健康度）+ 模組化（rules/+Context Budget）+ 環境清理

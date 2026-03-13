@@ -98,7 +98,12 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f\"\"ID: {d[''''id'''']}\\\\nName: {d[''''name'''']}\\\\nDefault branch: {d[''''default_branch'''']}\\\\nVisibility: {d[''''visibility'''']}\"\"\\)\")",
       "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f\"\"Branch: {b[''''name'''']}, Push: {b.get\\(''''push_access_levels''''\\)}, Merge: {b.get\\(''''merge_access_levels''''\\)}\"\"\\) for b in data] if data else print\\(''''No protected branches''''\\)\")",
       "Read(//c/tmp/gdoc-harvester/$LOCALAPPDATA/Google/Chrome/**)",
-      "Bash(python3 -c \":*)"
+      "Bash(python3 -c \":*)",
+      "Read(//root/.claude/**)",
+      "Read(//root/.claude/memory/**)",
+      "Read(//home/holylight/.claude/**)",
+      "Read(//home/holylight/.claude/memory/**)",
+      "WebSearch"
     ],
     "additionalDirectories": [
       "C:\\Users\\holylight\\.claude",

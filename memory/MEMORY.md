@@ -26,7 +26,7 @@
 - [固] Guardian @ localhost:3848 | Vector @ localhost:3849
 - [固] GPU: GTX 1050 Ti 4GB | qwen3-embedding + qwen3:1.7b
 - [固] Vector DB: LanceDB | search_min_score: 0.65
-- [固] 原子記憶 V2.10：回應捕獲 + 跨 Session 鞏固 + 自我迭代 + Wisdom Engine + 檢索強化(V2.9) + Read Tracking + VCS Query Capture + _staging 暫存區(V2.10)
+- [固] 原子記憶 V2.11：僅 SessionEnd 萃取 + 簡化鞏固 + 自我迭代(3條) + Wisdom(硬規則+反思校準) + Context Budget(3000t) + 衝突偵測 + Atom 健康度 + rules/ 模組化
 - [固] Excel: `~/.claude/tools/read-excel.py`（Python3 + openpyxl + xlrd）
 - [固] SVN 專案修改前必問 svn update（每 session 一次）| Skill: /svn-update
-- [觀] Wisdom Engine: causal graph + reflection + situation classifier
+- [觀] Wisdom Engine: 硬規則情境分類 + 反思校準(over_engineering + silence_accuracy)

@@ -7,7 +7,7 @@
 - Confirmations: 19
 - Type: procedural
 - Tags: toolchain, environment, commands
-- Related: hardware
+- Related: failures
 
 ## 知識
 

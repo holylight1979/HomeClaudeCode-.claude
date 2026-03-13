@@ -20,6 +20,7 @@
 - [觀] Windows Node.js `rmSync()` 對 CJK 檔名靜默失敗（不報錯但不刪除）→ 以為刪除成功 → 改用 `unlinkSync()`（根因: rmSync 內部路徑處理與 NTFS CJK 字元不相容）
 - [臨] MCP `Ctrl+Shift+Escape` 被安全機制擋住（"dangerous key combination"）→ 改用 Command Palette 輸入指令名稱（根因: Ctrl+Shift+Escape 是 Windows Task Manager 快捷鍵，MCP 禁止觸發系統功能）
 - [臨] VS Code "Open in New Tab" 開 Claude Code 會與側邊欄 CHAT 面板搶焦點 → 點擊/貼上操作進入錯誤面板 → 改用 "Open in New Window" 獨立視窗（根因: 同視窗兩個 webview 輸入框座標重疊）
+- [臨] 舊 MCP server process 佔住 port 3848 → 新 Guardian routes/cleanup 全不生效 → 先殺舊 process，heartbeat 15s 內自動 rebind（根因: process 未正常退出時 port 不釋放）
 - [固] MCP server 設定用 `npx.cmd` 在 VSCode 子進程中啟動失敗（`cmd /c npx` 也不行）→ 全域安裝套件後改用 `node.exe` 直接跑 `.js` 入口點（根因: VSCode extension 環境 spawn `.cmd` 批次檔失敗；解法: `npm install -g <pkg>` → 找 package.json `bin` 欄位對應的 .js → 用 `node.exe <path>.js` 替代 npx）
 
 ### Playwright + Google 踩坑
