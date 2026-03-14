@@ -131,12 +131,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$USERPROFILE/.claude/hooks/user-init.sh\"",
+            "command": "bash \"C:/Users/holylight/.claude/hooks/user-init.sh\"",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "python \"$USERPROFILE/.claude/hooks/workflow-guardian.py\"",
+            "command": "python \"C:/Users/holylight/.claude/hooks/workflow-guardian.py\"",
             "timeout": 5
           }
         ]
@@ -147,7 +147,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$USERPROFILE/.claude/hooks/workflow-guardian.py\"",
+            "command": "python \"C:/Users/holylight/.claude/hooks/workflow-guardian.py\"",
             "timeout": 3
           }
         ]
@@ -159,7 +159,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$USERPROFILE/.claude/hooks/workflow-guardian.py\"",
+            "command": "python \"C:/Users/holylight/.claude/hooks/workflow-guardian.py\"",
             "timeout": 3
           }
         ]
@@ -170,7 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$USERPROFILE/.claude/hooks/workflow-guardian.py\"",
+            "command": "python \"C:/Users/holylight/.claude/hooks/workflow-guardian.py\"",
             "timeout": 5
           }
         ]
@@ -181,7 +181,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$USERPROFILE/.claude/hooks/workflow-guardian.py\"",
+            "command": "python \"C:/Users/holylight/.claude/hooks/workflow-guardian.py\"",
             "timeout": 5
           }
         ]
@@ -192,7 +192,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$USERPROFILE/.claude/hooks/workflow-guardian.py\"",
+            "command": "python \"C:/Users/holylight/.claude/hooks/workflow-guardian.py\"",
             "timeout": 30
           }
         ]
