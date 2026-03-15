@@ -4,7 +4,7 @@
 - Confidence: [觀]
 - Source: 2026-03-05 V2.3 升級全面掃描
 - Last-used: 2026-03-15
-- Confirmations: 10
+- Confirmations: 12
 - Trigger: 升級 OpenClaw, 版本管理, config merge, plugin 管理, 自我除錯, 迭代, 維護, 更新版本, 除錯流程
 - Privacy: public
 

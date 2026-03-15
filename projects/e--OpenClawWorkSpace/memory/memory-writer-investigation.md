@@ -3,8 +3,8 @@
 - Scope: project
 - Confidence: [固]
 - Source: 2026-03-05~06 — 多 session 深度調查
-- Last-used: 2026-03-12 (RESOLVED — hook 正常運作)
-- Confirmations: 5
+- Last-used: 2026-03-15 (RESOLVED — hook 正常運作)
+- Confirmations: 7
 - Trigger: memory-writer, hook 不觸發, message:before, message:sent, message:preprocessed, staging
 - Privacy: public
 

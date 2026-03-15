@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-03-05 V2.3 升級全面掃描
-- Last-used: 2026-03-12
-- Confirmations: 4
+- Last-used: 2026-03-15
+- Confirmations: 5
 - Trigger: OpenClaw 架構, 運作流程, Gateway 管線, preprocessor 管線, 演算法, 降級, Token 流向, 服務拓撲, 系統概覽
 - Privacy: public
 

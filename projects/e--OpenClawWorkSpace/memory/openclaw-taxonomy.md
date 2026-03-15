@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-03-05 V2.3 升級 — taxonomy/categories.json 完整掃描
-- Last-used: 2026-03-12
-- Confirmations: 6
+- Last-used: 2026-03-15
+- Confirmations: 7
 - Trigger: 人事時地物, 五大分類, taxonomy, 分類系統, categories.json, 子分類, atomPaths, noMemoryIntents
 - Privacy: public
 

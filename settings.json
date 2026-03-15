@@ -27,7 +27,6 @@
       "Read(//c/Users/**)",
       "Read(//c/ProgramData/**)",
       "Read(//tmp/**)",
-      "Read(//e/OpenClawWorkSpace/**)",
       "mcp__MCPControl__get_screen_size",
       "mcp__workflow-guardian__workflow_signal",
       "mcp__workflow-guardian__workflow_status",
@@ -66,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node E:/OpenClawWorkSpace/.claude/scripts/inbox-check.js"
+            "command": "node C:/Users/holyl/.claude/scripts/inbox-check.js"
           }
         ]
       }

@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Source: 2026-02-26~27 holylight — 安裝、整合、除錯過程中踩到的坑
-- Last-used: 2026-03-12
-- Confirmations: 6
+- Last-used: 2026-03-15
+- Confirmations: 7
 - Trigger: 遇到錯誤訊息、異常行為、啟動失敗、設定不生效、沒有回應、連不上、Discord bot、webhook 失敗、ngrok error、404、502
 - Privacy: public
 

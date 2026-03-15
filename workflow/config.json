@@ -38,7 +38,7 @@
     "additional_atom_dirs": [
       {
         "name": "openclaw",
-        "path": "E:/OpenClawWorkSpace/.openclaw/workspace/atoms",
+        "path": "E:/.openclaw/memory/atoms",
         "recursive": true,
         "skip_files": ["decisions", "system-health", "claude-code-delegation", "workspace-access", "_active"]
       }
