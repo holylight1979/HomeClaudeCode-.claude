@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 工具, 環境, 指令, command, path, 路徑, bash, git, python, npm, ollama
-- Last-used: 2026-03-13
-- Confirmations: 25
+- Last-used: 2026-03-16
+- Confirmations: 35
 - Type: procedural
 - Tags: toolchain, environment, commands
 - Related: failures

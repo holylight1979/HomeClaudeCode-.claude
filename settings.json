@@ -112,7 +112,13 @@
       "Bash(find /c/Users/holylight/.claude -name config*.json -o -name *.config.json)",
       "Bash(find c:Projectssgi_client -name *MapSystem*.cs -type f)",
       "Bash(find c:Projectssgi_client -name *SceneSystem*.cs -type f)",
-      "Bash(grep -r \"ImageTextLoaderAdapt\\\\|LanguageImage\" c:/Projects/sgi_client --include=*.cs)"
+      "Bash(grep -r \"ImageTextLoaderAdapt\\\\|LanguageImage\" c:/Projects/sgi_client --include=*.cs)",
+      "Bash(find ~/.claude -name workflow-guardian.py -o -name *guardian* -type f)",
+      "Bash(grep -r _AIAtoms ~/.claude/ --include=*.py)",
+      "Bash(wc -c /c/Users/holylight/.claude/rules/*.md)",
+      "Bash(find c:/Projects/sgi_client/client/Assets -name *BuildTool* -o -name *Bundle*Builder*)",
+      "Bash(grep -r \"class.*Node.*ScriptableObject\\\\|class ConfigGraph\\\\|class GraphNodeSetting\" c:/Projects/sgi_client/client/Assets/AssetGraph --include=*.cs)",
+      "Bash(grep -r \"BuildPipeline\\\\.BuildAssetBundles\\\\|ExecutionGraph\\\\|PerformGraph\" c:/Projects/sgi_client/client/Assets --include=*.cs)"
     ],
     "additionalDirectories": [
       "C:\\Users\\holylight\\.claude",

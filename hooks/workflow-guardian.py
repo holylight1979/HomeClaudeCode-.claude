@@ -1401,6 +1401,18 @@ def handle_user_prompt_submit(
             f'相關的記憶 atom。建議 LLM 主動搜尋檔案或詢問使用者。'
         )
 
+    # ── Fix Escalation Protocol (v2.12) ─────────────────────────────
+    retry_count = state.get("wisdom_retry_count", 0)
+    fix_esc_warned = state.get("fix_escalation_warned", False)
+    if retry_count >= 2 and not fix_esc_warned:
+        state["fix_escalation_warned"] = True
+        lines.append(
+            f"[Guardian:FixEscalation] 偵測到重複修正 "
+            f"(retry={retry_count})。"
+            "依據「精確修正升級」規則，必須暫停直接修復，"
+            "執行 /fix-escalation 精確修正會議。"
+        )
+
     # ─── Topic tracking (v2.2) ─────────────────────────────────────
     _update_topic_tracker(state, prompt, intent, newly_injected)
 

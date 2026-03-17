@@ -17,16 +17,27 @@
 
 ## Step 1: 檢查暫存區
 
-檢查**專案層** `memory/_staging/next-phase.md` 是否存在。
+用 **Read tool**（不是 Glob）直接讀取以下絕對路徑：
 
-路徑規則：
-- 專案層 memory 目錄位於 `~/.claude/projects/{project-slug}/memory/`
-- 完整路徑：`{專案層 memory}/_staging/next-phase.md`
+```
+~/.claude/projects/MEMORY.md
+```
+
+從 MEMORY.md 所在目錄推算 staging 路徑，然後用 Read tool 讀取：
+
+```
+{MEMORY.md 所在目錄}/_staging/next-phase.md
+```
+
+> 例：如果 MEMORY.md 在 `~/.claude/projects/c--Projects/memory/MEMORY.md`，
+> 則讀 `~/.claude/projects/c--Projects/memory/_staging/next-phase.md`
+
+**重要**：不要用 Glob 搜尋。直接用 Read tool 讀絕對路徑。路徑在系統 context 的 "Additional working directories" 中可以找到 memory 目錄的位置。
 
 ### 分流
 
-- **檔案存在** → 繼續 Step 2
-- **檔案不存在** → 回覆「沒有待續任務。使用 `/resume` 可從 atoms/git/todo 推斷續接工作。」→ 結束
+- **讀取成功** → 繼續 Step 2
+- **檔案不存在（Read 報錯）** → 回覆「沒有待續任務。`_staging/` 目錄下無 `next-phase.md` 檔案。使用 `/resume` 可從 atoms/git/todo 推斷續接工作。」→ 結束
 
 ## Step 2: 讀取並刪除
 

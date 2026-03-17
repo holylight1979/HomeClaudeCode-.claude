@@ -14,6 +14,7 @@
 | gdoc-harvester | memory/gdoc-harvester.md | harvester, Google Docs, Sheets, 收割, Playwright, cookie, export | [觀] |
 | feedback-research | memory/feedback_research_first.md | 試錯, trial-and-error, 不熟悉, API, 框架, 搜尋, research | [固] |
 | doc-index-system | memory/doc-index-system.md | 系統架構, 檔案結構, file tree, hook, skill, tool, 升級, 迭代 | [臨] |
+| fix-escalation | memory/feedback_fix_escalation.md | 修正, 重試, 第二次, 升級, escalation, 精確修正, fix, retry | [固] |
 
 ## 高頻事實
 
