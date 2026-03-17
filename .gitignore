@@ -50,6 +50,8 @@ memory/_distant/
 # ─── User-specific config (per-user, auto-generated) ──────
 USER.md
 USER-*.md
+IDENTITY.md
+IDENTITY-*.md
 
 # ─── User-specific atoms (hardware, local env) ────────────
 memory/hardware.md
