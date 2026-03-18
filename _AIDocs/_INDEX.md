@@ -11,11 +11,10 @@
 |---|---------|------|
 | 1 | Architecture.md | 系統架構總覽：原子記憶 V2.12 + Workflow Guardian + Wisdom Engine + hooks |
 | 2 | Project_File_Tree.md | 完整目錄結構 |
-| 3 | AtomicMemory-v2.1-Plan.md | v2.1 缺陷研究與修補計畫（歷史文件） |
-| 4 | _CHANGELOG.md | 變更記錄（最近 ~8 筆） |
-| 5 | _CHANGELOG_ARCHIVE.md | 變更記錄封存 |
-| 6 | ../README.md | 完整運作知識庫 + 7 階段流程圖（GitHub 入口） |
-| 7 | DocIndex-System.md | 全 76 檔系統索引（啟動鏈 + Hook + Skill + Tool + Memory） |
+| 3 | _CHANGELOG.md | 變更記錄（最近 ~8 筆） |
+| 4 | _CHANGELOG_ARCHIVE.md | 變更記錄封存 |
+| 5 | ../README.md | 完整運作知識庫 + 7 階段流程圖（GitHub 入口） |
+| 6 | DocIndex-System.md | 全 76 檔系統索引（啟動鏈 + Hook + Skill + Tool + Memory） |
 
 ---
 
