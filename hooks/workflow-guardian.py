@@ -342,7 +342,7 @@ def get_project_memory_dir(cwd: str) -> Optional[Path]:
 
 # ─── _AIDocs Bridge (v2.10) ──────────────────────────────────────────────
 
-AiDocsEntry = Tuple[str, str]  # (filename, description)
+AiDocsEntry = Tuple[str, str, List[str]]  # (filename, description, keywords)
 
 
 def find_project_root(cwd: str) -> Optional[Path]:
@@ -397,21 +397,32 @@ def parse_aidocs_index(project_root: Path) -> List[AiDocsEntry]:
                 # Skip deprecated (strikethrough) entries
                 if fname.startswith("~~") or "淘汰" in desc:
                     continue
-                entries.append((fname, desc))
+                # Parse explicit keywords from 4th column (comma-separated)
+                keywords: List[str] = []
+                if len(cells) >= 4 and cells[3].strip():
+                    keywords = [k.strip().lower() for k in cells[3].split(",") if k.strip()]
+                entries.append((fname, desc, keywords))
     return entries
 
 
 def extract_aidocs_keywords(entries: List[AiDocsEntry]) -> Dict[str, List[str]]:
-    """Extract search keywords from _AIDocs descriptions."""
+    """Extract search keywords from _AIDocs entries.
+
+    Priority: explicit keywords from _INDEX.md 4th column → fallback to description auto-extract.
+    """
     STOP = {"的", "與", "和", "等", "個", "含", "—", "md", "分析", "說明", "文件", "專案"}
     result: Dict[str, List[str]] = {}
-    for fname, desc in entries:
-        words = re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z_]{3,}", desc.lower())
-        keywords = [w for w in words if w not in STOP]
-        # Also include filename stem as keywords
-        stem = Path(fname).stem.lower().replace("_", " ").replace("-", " ")
-        keywords.extend(stem.split())
-        result[fname] = list(set(keywords))[:10]
+    for fname, desc, explicit_kw in entries:
+        if explicit_kw:
+            # Use explicit keywords directly (already lowercased by parser)
+            result[fname] = explicit_kw[:15]
+        else:
+            # Fallback: auto-extract from description
+            words = re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z_]{3,}", desc.lower())
+            keywords = [w for w in words if w not in STOP]
+            stem = Path(fname).stem.lower().replace("_", " ").replace("-", " ")
+            keywords.extend(stem.split())
+            result[fname] = list(set(keywords))[:10]
     return result
 
 
@@ -1026,7 +1037,7 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         aidocs_keywords = extract_aidocs_keywords(aidocs_entries) if aidocs_entries else {}
         state["aidocs"] = {
             "project_root": str(project_root) if project_root else "",
-            "entries": [(f, d) for f, d in aidocs_entries],
+            "entries": [(f, d) for f, d, _kw in aidocs_entries],
             "keywords": aidocs_keywords,
         }
 
@@ -1044,7 +1055,7 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         max_entries = config.get("aidocs", {}).get("max_session_start_entries", 15)
         if aidocs_entries:
             aidocs_lines = [f"[AIDocs] {len(aidocs_entries)} docs in _AIDocs/:"]
-            for fname, desc in aidocs_entries[:max_entries]:
+            for fname, desc, _kw in aidocs_entries[:max_entries]:
                 clean = re.sub(r"[*~`]", "", desc).strip()
                 aidocs_lines.append(f"  - {fname}: {clean[:80]}")
             lines.extend(aidocs_lines)
@@ -1184,7 +1195,7 @@ def handle_user_prompt_submit(
     if aidocs_kw_map and prompt.strip():
         matched_docs: List[str] = []
         for fname, keywords in aidocs_kw_map.items():
-            if any(kw in prompt_lower for kw in keywords):
+            if any(_kw_match(kw, prompt_lower) for kw in keywords):
                 matched_docs.append(fname)
         if matched_docs and len(matched_docs) <= 5:
             aidocs_root = aidocs_state.get("project_root", "")
