@@ -1245,11 +1245,11 @@ def handle_user_prompt_submit(
                 continue
             cross_parent = cross_mem.parent
             for name, rel_path, triggers in cross_atoms:
-                if name not in already_injected and any(kw in prompt_lower for kw in triggers):
+                if name not in already_injected and sum(_kw_match(kw, prompt_lower) for kw in triggers) >= 2:
                     all_atoms.append(((name, rel_path, triggers), cross_parent))
                     lines.append(f"[Guardian:CrossProject] {proj_dir.name}/{name} matched")
     for (name, rel_path, triggers), base_dir in all_atoms:
-        if name not in already_injected and any(kw in prompt_lower for kw in triggers):
+        if name not in already_injected and any(_kw_match(kw, prompt_lower) for kw in triggers):
             matched_with_dir.append(((name, rel_path, triggers), base_dir))
 
     # ── Intent classification (v2.1) ────────────────────────────────
@@ -1430,7 +1430,8 @@ def handle_user_prompt_submit(
                     break
 
     # ── Blind-Spot Reporter (v2.9) ──────────────────────────────────
-    if not matched_with_dir and not newly_injected and not alias_injected_projects:
+    if (not matched_with_dir and not newly_injected and not alias_injected_projects
+            and len(prompt.strip()) >= 10):
         prompt_preview = prompt[:50].strip()
         if len(prompt) > 50:
             prompt_preview += "..."
@@ -1486,8 +1487,10 @@ def handle_user_prompt_submit(
 
     write_state(session_id, state)
 
-    # atom-debug: log injection content (NONE if empty)
-    _atom_debug_log("注入", "\n".join(lines) if lines else None, config)
+    # atom-debug: log injection content with user prompt
+    prompt_preview = prompt[:200].strip() if prompt else ""
+    injection_body = f"[PROMPT] {prompt_preview}\n[注入內容]\n" + ("\n".join(lines) if lines else "NONE")
+    _atom_debug_log("注入", injection_body, config)
 
     if lines:
         # V2.11: Context budget hard cap
