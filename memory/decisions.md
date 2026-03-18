@@ -76,7 +76,7 @@
 - [固] VCS Query Capture：PostToolUse 攔截 Bash tool，regex 匹配 git/svn log/blame/show/diff
 - [固] Episodic 閱讀軌跡：`_build_read_tracking_section()` 生成 `## 閱讀軌跡` section（最多 30 檔 + 10 筆版控查詢）
 - [固] 純閱讀 Session：accessed_files ≥ 5 且無修改時也生成 episodic atom
-- [固] 暫存區管理：`memory/_staging/` 存放續接 prompt 等臨時檔案，.gitignore 排除，SessionEnd 提醒清理
+- [固] 暫存區管理：`projects/{slug}/memory/_staging/` 專案層暫存區，每個專案獨立續接。.gitignore 排除，SessionEnd 提醒清理
 
 ### V2.12 精確修正計畫
 - [固] Fix Escalation Protocol：同一問題修正第 2 次起，強制啟動 6 Agent 精確修正會議（外部搜索+專案調查+正反辯論 2 輪+落地分析+垃圾回收）
