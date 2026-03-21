@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 工具, 環境, 指令, command, bash, git, python, npm
 - Last-used: 2026-03-21
-- Confirmations: 121
+- Confirmations: 124
 - Type: procedural
 - Tags: toolchain, environment, commands
 - Related: fail-env, toolchain-ollama
