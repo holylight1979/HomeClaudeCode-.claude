@@ -1099,16 +1099,18 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
                 lines.append(f"Intents: {intent_str}.")
             if keywords:
                 lines.append(f"Topics: {', '.join(keywords[:8])}.")
-        # Check for staging next-phase prompt
+        # Check for staging files (next-phase + pending-tasks)
         project_mem_dir = get_project_memory_dir(cwd)
         if project_mem_dir:
-            staging_path = Path(project_mem_dir) / "_staging" / "next-phase.md"
-            if staging_path.exists():
-                try:
-                    staging_content = staging_path.read_text(encoding="utf-8")[:500]
-                    lines.append(f"[Staging] next-phase.md found: {staging_content[:200]}...")
-                except Exception:
-                    lines.append("[Staging] next-phase.md exists but could not be read.")
+            staging_dir = Path(project_mem_dir) / "_staging"
+            for fname in ("pending-tasks.md", "next-phase.md"):
+                staging_path = staging_dir / fname
+                if staging_path.exists():
+                    try:
+                        staging_content = staging_path.read_text(encoding="utf-8")[:500]
+                        lines.append(f"[Staging] {fname}: {staging_content[:300]}")
+                    except Exception:
+                        lines.append(f"[Staging] {fname} exists but could not be read.")
         lines.append("Remember: check CLAUDE.md sync rules before ending.")
     else:
         state = new_state(session_id, cwd, source)
