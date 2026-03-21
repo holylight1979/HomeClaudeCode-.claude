@@ -1,4 +1,5 @@
 {
-  "session_count": 8,
-  "reviewed_at": "2026-03-19T20:23:58+08:00"
+  "session_count": 66,
+  "reviewed_at": "2026-03-21T21:45:00+08:00",
+  "review_notes": "批量晉升 failures/ 下 [臨]/[觀]→[固] 共 10 項；補全 4 個 failure atoms 的 Related 互引"
 }
