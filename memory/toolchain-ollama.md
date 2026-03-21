@@ -3,9 +3,9 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: ollama, dual-backend, rdchat, qwen3, embedding, 萃取品質, thinking, failover, Open WebUI
-- Last-used: 2026-03-20
+- Last-used: 2026-03-21
 - Created: 2026-03-19
-- Confirmations: 59
+- Confirmations: 60
 - Type: procedural
 - Tags: ollama, dual-backend, extraction
 - Related: toolchain, decisions-architecture

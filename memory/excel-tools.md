@@ -4,9 +4,9 @@
 - Confidence: [固]
 - Type: procedural
 - Trigger: Excel, xls, xlsx, 讀取, 試算表, spreadsheet, openpyxl, xlrd
-- Last-used: 2026-03-20
+- Last-used: 2026-03-21
 - Created: 2026-03-03
-- Confirmations: 17
+- Confirmations: 19
 - Tags: tool, excel, python
 
 ## 知識
