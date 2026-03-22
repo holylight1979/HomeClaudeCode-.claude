@@ -30,7 +30,7 @@
 | `BOOTSTRAP.md` | 首次設定引導 |
 | `settings.json` | Hook 綁定 + 權限 + MCP |
 | `.mcp.json` | MCP server 定義 |
-| `workflow/config.json` | Guardian/Vector/WriteGate/Capture 參數 |
+| `workflow/config.json` | Guardian/Vector/WriteGate/Capture/SelfIteration 參數 |
 
 ### 規則模組（rules/）
 
@@ -117,3 +117,4 @@
 | 2026-03-13 | 初始建立 | /read-project |
 | 2026-03-19 | 精修：純索引化，移除架構描述，去重 decisions | 系統精修 |
 | 2026-03-19 | 更新 extract-worker/guardian 行數+功能（v2.13 failure mode） | failures 自動化 |
+| 2026-03-22 | config.json 欄位更新（self_iteration 區塊） | V2.16 文件同步 |
