@@ -63,10 +63,10 @@
 - [固] config.json `self_iteration` 欄位：decay_half_life_days, promote_min_confirmations, archive_score_threshold, oscillation_window, oscillation_threshold, review_interval
 
 ### 覆轍偵測（V2.17）
-- [臨] 寄生式設計：不新增檔案/參數/子系統，附著在 episodic atom 上
-- [臨] SessionEnd：`edit_counts ≥ 3` → `same_file_3x:{filename}` 信號；`retry_count ≥ 2` → `retry_escalation` 信號，寫入 episodic 的「覆轍信號:」欄位
-- [臨] SessionStart：`_detect_rut_patterns()` 掃描最近 N 個 episodic（共用 oscillation_window），同一信號出現 ≥ 2 sessions → 注入 `[Guardian:覆轍]`
-- [臨] 職責切分：session 內重試 → fix-escalation；atom 反覆修改 → 震盪偵測；跨 session 行為模式 → 覆轍偵測
+- [觀] 寄生式設計：不新增檔案/參數/子系統，附著在 episodic atom 上
+- [觀] SessionEnd：`edit_counts ≥ 3` → `same_file_3x:{filename}` 信號；`retry_count ≥ 2` → `retry_escalation` 信號，寫入 episodic 的「覆轍信號:」欄位
+- [觀] SessionStart：`_detect_rut_patterns()` 掃描最近 N 個 episodic（共用 oscillation_window），同一信號出現 ≥ 2 sessions → 注入 `[Guardian:覆轍]`
+- [觀] 職責切分：session 內重試 → fix-escalation；atom 反覆修改 → 震盪偵測；跨 session 行為模式 → 覆轍偵測
 
 ### 環境維護
 - [固] rules/ 模組化：CLAUDE.md ~50 行，4 規則檔自動載入
