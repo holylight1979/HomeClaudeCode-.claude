@@ -1149,6 +1149,14 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
     except Exception as e:
         print(f"[v2.6] Review check error: {e}", file=sys.stderr)
 
+    # ── V2.16: Oscillation warnings from previous session ──────────
+    try:
+        osc_warning = _load_oscillation_warnings()
+        if osc_warning:
+            lines.append(osc_warning)
+    except Exception as e:
+        print(f"[v2.16] Oscillation load error: {e}", file=sys.stderr)
+
     # ── V2.8: Wisdom Engine — reflection blind spots ───────────────
     if WISDOM_AVAILABLE:
         try:
@@ -2847,8 +2855,29 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
                     f"({osc['count']} sessions)",
                     file=sys.stderr,
                 )
+        # V2.16: Persist oscillation state for next SessionStart
+        _save_oscillation_state(oscillations if oscillations else [])
     except Exception as e:
         print(f"[v2.6] Self-iteration metrics error: {e}", file=sys.stderr)
+
+    # ─── V2.16: Self-iteration automation (decay + promotion) ────────
+    try:
+        si_results = _self_iterate_atoms(state, config)
+        if si_results.get("promoted"):
+            for p in si_results["promoted"]:
+                print(
+                    f"[v2.16] Auto-promoted [臨]→[觀] in {p['atom']}: "
+                    f"{len(p['items'])} items",
+                    file=sys.stderr,
+                )
+        if si_results.get("archive_candidates"):
+            print(
+                f"[v2.16] Archive candidates: "
+                f"{len(si_results['archive_candidates'])} atoms (low decay score)",
+                file=sys.stderr,
+            )
+    except Exception as e:
+        print(f"[v2.16] Self-iteration error: {e}", file=sys.stderr)
 
     # ─── V2.8: Wisdom Engine — session reflection ────────────────────
     if WISDOM_AVAILABLE:
@@ -3172,6 +3201,146 @@ def _calculate_maturity_phase(config: Dict[str, Any]) -> Dict[str, Any]:
         desc = f"成熟期（{total} sessions）— 極少新增，專注精煉"
 
     return {"phase": phase, "total_sessions": total, "description": desc}
+
+
+def _self_iterate_atoms(
+    state: Dict[str, Any], config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """V2.16: Automated self-iteration — decay scoring + [臨]→[觀] auto-promotion.
+
+    Runs at SessionEnd. Scans all atom files, calculates health scores,
+    auto-promotes [臨] items in mature atoms, reports archive candidates.
+    """
+    import math
+
+    si_config = config.get("self_iteration", {})
+    decay_half_life = si_config.get("decay_half_life_days", 30)
+    promote_min_conf = si_config.get("promote_min_confirmations", 20)
+    archive_threshold = si_config.get("archive_score_threshold", 0.3)
+
+    results = {"promoted": [], "archive_candidates": [], "scanned": 0}
+    today = datetime.now()
+
+    # Collect atom dirs (global + failures/)
+    scan_dirs = [MEMORY_DIR]
+    failure_dir = MEMORY_DIR / "failures"
+    if failure_dir.exists():
+        scan_dirs.append(failure_dir)
+
+    for atom_dir in scan_dirs:
+        for md_file in atom_dir.glob("*.md"):
+            # Skip non-atom files
+            if md_file.name in ("MEMORY.md", "SPEC_Atomic_Memory_System.md"):
+                continue
+            if md_file.name.startswith("_"):
+                continue
+
+            try:
+                text = md_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            results["scanned"] += 1
+
+            # Parse metadata
+            lu_match = re.search(r"Last-used:\s*(\d{4}-\d{2}-\d{2})", text)
+            conf_match = re.search(r"Confirmations:\s*(\d+)", text)
+            if not lu_match or not conf_match:
+                continue
+
+            last_used = datetime.strptime(lu_match.group(1), "%Y-%m-%d")
+            confirmations = int(conf_match.group(1))
+
+            # Composite decay score
+            days_since = (today - last_used).days
+            recency = math.exp(-math.log(2) * max(days_since, 0) / decay_half_life)
+            usage = min(1.0, math.log10(confirmations + 1) / 2)
+            score = 0.5 * recency + 0.5 * usage
+
+            # Archive candidate?
+            if score < archive_threshold:
+                results["archive_candidates"].append({
+                    "atom": md_file.stem,
+                    "score": round(score, 3),
+                    "last_used": lu_match.group(1),
+                    "confirmations": confirmations,
+                })
+
+            # Auto-promote [臨]→[觀] if atom confirmations high enough
+            if confirmations >= promote_min_conf:
+                lines = text.split("\n")
+                promoted_in_file = []
+                changed = False
+                for i, line in enumerate(lines):
+                    if re.match(r"^- \[臨\]", line):
+                        lines[i] = line.replace("- [臨]", "- [觀]", 1)
+                        desc = line.split("[臨]", 1)[-1].strip()[:60]
+                        promoted_in_file.append(desc)
+                        changed = True
+
+                if changed:
+                    md_file.write_text("\n".join(lines), encoding="utf-8")
+                    results["promoted"].append({
+                        "atom": md_file.stem,
+                        "items": promoted_in_file,
+                        "confirmations": confirmations,
+                    })
+
+    # Write archive candidates to staging
+    if results["archive_candidates"]:
+        staging = MEMORY_DIR / "_staging"
+        staging.mkdir(exist_ok=True)
+        out_lines = [
+            f"# Archive Candidates ({today.strftime('%Y-%m-%d')})\n",
+            f"Score < {archive_threshold} — 考慮封存或刪除：\n",
+        ]
+        for c in results["archive_candidates"]:
+            out_lines.append(
+                f"- **{c['atom']}** — score={c['score']}, "
+                f"last_used={c['last_used']}, confirmations={c['confirmations']}"
+            )
+        (staging / "archive-candidates.md").write_text(
+            "\n".join(out_lines), encoding="utf-8"
+        )
+
+    return results
+
+
+def _save_oscillation_state(oscillations: List[Dict[str, Any]]) -> None:
+    """Persist oscillation detection results for next SessionStart."""
+    osc_path = WORKFLOW_DIR / "oscillation_state.json"
+    if oscillations:
+        data = {
+            "detected_at": datetime.now().isoformat(),
+            "oscillations": [
+                {"atom": o["atom"], "count": o["count"], "sessions": o["sessions"]}
+                for o in oscillations
+            ],
+        }
+        with open(osc_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    elif osc_path.exists():
+        osc_path.unlink()
+
+
+def _load_oscillation_warnings() -> Optional[str]:
+    """Load persisted oscillation warnings for SessionStart injection."""
+    osc_path = WORKFLOW_DIR / "oscillation_state.json"
+    if not osc_path.exists():
+        return None
+    try:
+        with open(osc_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        oscillations = data.get("oscillations", [])
+        if not oscillations:
+            return None
+        atoms = ", ".join(o["atom"] for o in oscillations)
+        return (
+            f"[Guardian:Oscillation] 以下 atoms 近期被反覆修改，"
+            f"建議暫停修改等待穩定：{atoms}"
+        )
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _check_periodic_review_due(config: Dict[str, Any]) -> Optional[str]:
