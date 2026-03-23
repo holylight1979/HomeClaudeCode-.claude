@@ -110,7 +110,6 @@
       }
     ]
   },
-  "autoUpdatesChannel": "latest",
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
       "source": {
@@ -119,5 +118,8 @@
       }
     }
   },
-  "effortLevel": "max"
+  "autoUpdatesChannel": "latest",
+  "enabledPlugins": {
+    "discord@claude-plugins-official": true
+  }
 }

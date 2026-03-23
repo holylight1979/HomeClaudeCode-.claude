@@ -4,9 +4,9 @@
 - Confidence: [固]
 - Type: semantic
 - Trigger: 系統架構, 檔案結構, file tree, architecture, hook, skill, tool, 升級, upgrade, 迭代, self-understand
-- Last-used: 2026-03-21
+- Last-used: 2026-03-23
 - Created: 2026-03-13
-- Confirmations: 37
+- Confirmations: 39
 - Tags: doc-index, system-overview
 - Related: decisions, decisions-architecture, toolchain
 
