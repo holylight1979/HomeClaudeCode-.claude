@@ -45,6 +45,37 @@ def _is_pid_alive(pid: int) -> bool:
             return False
 
 
+# ─── Lease-based Concurrency ────────────────────────────────────────────────
+
+_DEFAULT_LEASE_TTL = 300  # 5 minutes
+
+
+def _is_lease_valid(state: dict, key: str) -> bool:
+    """Check if a worker lease is still valid (not expired AND PID alive).
+
+    Lease format in state: {key}: {"pid": int, "expires_at": float}
+    Handles legacy format where {key} is a bare PID int.
+    """
+    import time as _time
+    lease = state.get(key)
+    if not lease:
+        return False
+    # Legacy: bare PID int → treat as expired (force migration)
+    if isinstance(lease, int):
+        return _is_pid_alive(lease)
+    pid = lease.get("pid", 0)
+    expires_at = lease.get("expires_at", 0)
+    if _time.time() > expires_at:
+        return False
+    return _is_pid_alive(pid)
+
+
+def _set_lease(state: dict, key: str, pid: int, ttl: int = _DEFAULT_LEASE_TTL) -> None:
+    """Write a lease entry into state."""
+    import time as _time
+    state[key] = {"pid": pid, "expires_at": _time.time() + ttl}
+
+
 # ─── Transcript Helpers ──────────────────────────────────────────────────────
 
 
@@ -139,9 +170,8 @@ def _maybe_spawn_per_turn_extraction(
         except (ValueError, TypeError):
             pass
 
-    # Concurrency guard
-    prev_pid = state.get("extract_worker_pid", 0)
-    if _is_pid_alive(prev_pid):
+    # Concurrency guard (lease-based)
+    if _is_lease_valid(state, "extract_worker_pid"):
         return
 
     # Check new content since last extraction
@@ -177,7 +207,7 @@ def _maybe_spawn_per_turn_extraction(
     }
     pid = _spawn_extract_worker(worker_ctx)
     if pid:
-        state["extract_worker_pid"] = pid
+        _set_lease(state, "extract_worker_pid", pid)
         state["last_per_turn_extraction_at"] = _now_iso()
         write_state(session_id, state)
         print(
@@ -228,8 +258,8 @@ def _maybe_spawn_failure_extraction(
         except (ValueError, TypeError):
             pass
 
-    fail_pid = state.get("failure_worker_pid", 0)
-    if _is_pid_alive(fail_pid):
+    # Concurrency guard (lease-based)
+    if _is_lease_valid(state, "failure_worker_pid"):
         return
 
     prev_offset = max(0, state.get("extraction_offset", 0) - 2000)
@@ -247,7 +277,7 @@ def _maybe_spawn_failure_extraction(
     }
     pid = _spawn_extract_worker(worker_ctx)
     if pid:
-        state["failure_worker_pid"] = pid
+        _set_lease(state, "failure_worker_pid", pid)
         state["last_failure_extraction_at"] = _now_iso()
         lines.append("[Guardian:FailureDetect] 偵測到失敗回報，背景萃取中...")
         _atom_debug_log(

@@ -571,7 +571,7 @@ def _per_turn_writeback(ctx: dict, result: dict) -> None:
     if result.get("final_offset"):
         state["extraction_offset"] = result["final_offset"]
 
-    state["extract_worker_pid"] = 0
+    state["extract_worker_pid"] = 0  # clear lease (worker done)
     state["last_updated"] = _now_iso()
     _write_state_atomic(state_path, state)
 

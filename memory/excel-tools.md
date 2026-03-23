@@ -6,7 +6,7 @@
 - Trigger: Excel, xls, xlsx, 讀取, 試算表, spreadsheet, openpyxl, xlrd
 - Last-used: 2026-03-23
 - Created: 2026-03-03
-- Confirmations: 14
+- Confirmations: 15
 - Tags: tool, excel, python
 
 ## 知識
