@@ -664,19 +664,30 @@ def _now_iso() -> str:
 # ─── Atom Debug Log ──────────────────────────────────────────────────────────
 
 
+def _estimate_tokens(text: str) -> int:
+    """CJK-aware token estimation. Chinese ~1.5 tok/char, ASCII ~0.25 tok/word."""
+    if not text:
+        return 0
+    cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3000' <= c <= '\u303f')
+    ascii_part = len(text) - cjk
+    return int(cjk * 1.5 + ascii_part * 0.25)
+
+
 def _atom_debug_log(tag: str, content: str, config: Dict[str, Any] = None) -> None:
     """Write to atom-debug.log when atom_debug flag is on.
-    For ERROR tag, always write regardless of flag."""
+    For ERROR tag, always write regardless of flag.
+    Skips empty/NONE entries to reduce noise."""
     if tag != "ERROR" and not (config or {}).get("atom_debug", False):
         return
+    if not content or not content.strip():
+        return  # suppress empty entries
     try:
         log_dir = Path.home() / ".claude" / "Logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"atom-debug-{datetime.now().strftime('%Y-%m-%d_%H')}.log"
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        body = content if content and content.strip() else "NONE"
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}][{tag}] {body}\n\n")
+            f.write(f"[{ts}][{tag}] {content.strip()}\n\n")
     except Exception:
         pass
 
@@ -1563,7 +1574,12 @@ def handle_user_prompt_submit(
     # ── Blind-Spot Reporter (v2.9) — debug log only, not injected ──
     if (not matched_with_dir and not newly_injected and not alias_injected_projects
             and len(clean_prompt) >= 10):
-        _atom_debug_log("BlindSpot", f"未匹配: {clean_prompt[:80]}", config)
+        sem_count = len(sem_atoms) if sem_atoms else 0
+        _atom_debug_log(
+            "BlindSpot",
+            f"未匹配: {clean_prompt[:80]} | intent={intent}, sem_results={sem_count}, already_injected={len(already_injected)}",
+            config,
+        )
 
     # ── Fix Escalation Protocol (v2.12) ─────────────────────────────
     retry_count = state.get("wisdom_retry_count", 0)
@@ -1617,10 +1633,40 @@ def handle_user_prompt_submit(
 
     write_state(session_id, state)
 
-    # atom-debug: log injection content with user prompt
-    prompt_preview = prompt[:200].strip() if prompt else ""
-    injection_body = f"[PROMPT] {prompt_preview}\n[注入內容]\n" + ("\n".join(lines) if lines else "NONE")
-    _atom_debug_log("注入", injection_body, config)
+    # atom-debug: log injection summary with token counts
+    if (config or {}).get("atom_debug", False):
+        prompt_preview = re.sub(r"<[^>]+>", "", prompt[:300]).strip()[:120] if prompt else ""
+        total_tok = 0
+        summary_parts = []
+        _ATOM_BLOCK_RE = re.compile(r"^\[Atom:(\S+)\](?:\s*\(related\))?\n")
+        for line_item in lines:
+            tok = _estimate_tokens(line_item)
+            total_tok += tok
+            am = _ATOM_BLOCK_RE.match(line_item)
+            if am:
+                aname = am.group(1)
+                is_related = "(related) " if "(related)" in line_item[:60] else ""
+                # Find source path from matched_with_dir
+                src = f"memory/{aname}.md"
+                for (n, rp, _), bd in matched_with_dir:
+                    if n == aname and rp:
+                        src = rp
+                        break
+                summary_parts.append(f"  [注入了 {src}] {is_related}(~{tok} tok)")
+            else:
+                # Short context lines: keep first line, add token count
+                first = line_item.split("\n", 1)[0][:120]
+                if line_item.count("\n") > 1:
+                    n_lines = line_item.count("\n") + 1
+                    summary_parts.append(f"  {first} ...({n_lines}行, ~{tok} tok)")
+                else:
+                    summary_parts.append(f"  {first} (~{tok} tok)")
+        injection_body = (
+            f"[PROMPT] {prompt_preview}\n"
+            f"[注入摘要] {len(lines)}項, 合計 ~{total_tok} tok\n"
+            + ("\n".join(summary_parts) if summary_parts else "NONE")
+        )
+        _atom_debug_log("注入", injection_body, config)
 
     if lines:
         # V2.11: Context budget hard cap
@@ -2838,7 +2884,13 @@ def _generate_episodic_atom(
     atom_path.write_text(content, encoding="utf-8")
     # v2.2: Episodic atoms NOT listed in MEMORY.md index (TTL 24d, vector search discovers them)
 
-    _atom_debug_log("萃取:episodic", content, config)
+    # Debug log: one-line summary instead of full content (full is in atom file)
+    kn_count = len(knowledge_lines)
+    _atom_debug_log(
+        "萃取:episodic",
+        f"{atom_path.name} | {scope_label} | {summary_line[:80]} | {kn_count} 筆知識 | TTL 24d → {expires}",
+        config,
+    )
     print(f"[episodic] Generated: {atom_path.name} (scope: {scope_label})", file=sys.stderr)
     return atom_name
 
