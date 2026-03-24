@@ -62,8 +62,10 @@
 | Skill | 用途 | 外部依賴 |
 |-------|------|---------|
 | `/atom-debug` | Debug log 開關 | 無 |
+| `/conflict` | 記憶衝突偵測（向量比對 + LLM 判定） | Vector Service + Ollama |
 | `/consciousness-stream` | 高風險跨系統任務 | 無 |
 | `/continue` | 續接暫存任務 | 無 |
+| `/extract` | 手動知識萃取（不等 SessionEnd） | Ollama |
 | `/fix-escalation` | 精確修正升級（6 Agent） | 無 |
 | `/harvest` | 網頁收割 → Markdown | Playwright |
 | `/init-project` | 專案知識庫初始化 | 無 |
@@ -74,6 +76,7 @@
 | `/svn-update` | SVN 更新 + 衝突處理 | TortoiseSVN |
 | `/unity-yaml` | Unity YAML 操作 | unity-yaml-tool.py |
 | `/upgrade` | 環境升級 | 無 |
+| `/vector` | 向量服務管理（啟停/索引/搜尋） | Vector Service |
 
 ### 工具（tools/）
 
