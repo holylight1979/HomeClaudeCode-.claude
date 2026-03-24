@@ -279,8 +279,13 @@ def _ensure_vector_service(config: Dict[str, Any]) -> None:
 
 def _semantic_search(
     prompt: str, config: Dict[str, Any], intent: str = "general"
-) -> List[Tuple[str, str, List[str]]]:
-    """Query Memory Vector Service with intent-aware ranked search (v2.1)."""
+) -> List[Tuple[str, str, List[str], List[Dict]]]:
+    """Query Memory Vector Service with intent-aware ranked search (v2.18).
+
+    Returns: [(atom_name, file_path, triggers[], sections[])]
+    sections is list of {section, text, score, line_number} from ranked-sections endpoint.
+    Empty sections list when falling back to ranked search.
+    """
     vs_config = config.get("vector_search", {})
     if not vs_config.get("enabled", True):
         return []
@@ -291,31 +296,43 @@ def _semantic_search(
 
     try:
         import urllib.parse
+
+        # Try ranked-sections first (v2.18)
+        use_sections = True
         params = urllib.parse.urlencode({
             "q": prompt, "top_k": top_k,
             "min_score": min(min_score, 0.50),
             "intent": intent,
+            "max_sections": 3,
         })
-        url = f"http://127.0.0.1:{port}/search/ranked?{params}"
+        url = f"http://127.0.0.1:{port}/search/ranked-sections?{params}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 results = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                params = urllib.parse.urlencode({"q": prompt, "top_k": top_k, "min_score": min_score})
-                url = f"http://127.0.0.1:{port}/search?{params}"
+                # Fallback: ranked search (no sections)
+                use_sections = False
+                params = urllib.parse.urlencode({
+                    "q": prompt, "top_k": top_k,
+                    "min_score": min(min_score, 0.50),
+                    "intent": intent,
+                })
+                url = f"http://127.0.0.1:{port}/search/ranked?{params}"
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
                 with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                     results = json.loads(resp.read())
             else:
                 raise
-        entries: List[Tuple[str, str, List[str]]] = []
+
+        entries: List[Tuple[str, str, List[str], List[Dict]]] = []
         seen = set()
         for r in results:
             name = r.get("atom_name", "")
             if name and name not in seen:
-                entries.append((name, r.get("file_path", ""), []))
+                sections = r.get("sections", []) if use_sections else []
+                entries.append((name, r.get("file_path", ""), [], sections))
                 seen.add(name)
         return entries
     except Exception as e:

@@ -342,6 +342,149 @@ def _truncate_context_by_activation(
     return new_lines
 
 
+# ─── Section-Level Extraction (v2.18) ───────────────────────────────────────
+
+SECTION_INJECT_THRESHOLD = 300  # tokens; atoms smaller than this → full inject
+
+_SECTION_HEADER_RE = re.compile(r"^(#{2,3})\s+(.+)", re.MULTILINE)
+_RELATED_LINE_RE = re.compile(r"^- Related:\s*.+", re.MULTILINE)
+
+
+def _extract_sections(
+    content: str,
+    section_hints: List[Dict[str, Any]],
+) -> Optional[str]:
+    """Extract matching sections from atom content based on vector search hints.
+
+    Args:
+        content: Full atom text (already stripped of metadata).
+        section_hints: List of dicts with 'section', 'text', 'line_number' from ranked_search_sections.
+
+    Returns:
+        Extracted content string, or None if should fallback to full injection
+        (0 matches, or extracted ≥ 70% of original).
+    """
+    if not section_hints:
+        return None
+
+    lines = content.split("\n")
+    total_lines = len(lines)
+
+    # Build section map: [{header, level, start_line, end_line}]
+    section_map: List[Dict[str, Any]] = []
+    for m in _SECTION_HEADER_RE.finditer(content):
+        level = len(m.group(1))  # 2 or 3
+        header_text = m.group(2).strip()
+        # Find line number (0-based)
+        line_no = content[:m.start()].count("\n")
+        section_map.append({
+            "header": header_text,
+            "level": level,
+            "start": line_no,
+            "end": total_lines,  # will be refined
+        })
+
+    # Set end boundaries
+    for i in range(len(section_map) - 1):
+        section_map[i]["end"] = section_map[i + 1]["start"]
+
+    # Collect hint section names (lowered)
+    hint_names = set()
+    for h in section_hints:
+        s = h.get("section", "").strip()
+        if s:
+            hint_names.add(s.lower())
+
+    # Match sections: exact first, then substring fuzzy
+    matched_sections: List[Dict[str, Any]] = []
+    matched_indices: set = set()
+
+    for idx, sec in enumerate(section_map):
+        header_lower = sec["header"].lower()
+        if header_lower in hint_names:
+            matched_sections.append(sec)
+            matched_indices.add(idx)
+
+    # Substring fuzzy for remaining hints
+    unmatched_hints = hint_names - {sec["header"].lower() for sec in matched_sections}
+    if unmatched_hints:
+        for idx, sec in enumerate(section_map):
+            if idx in matched_indices:
+                continue
+            header_lower = sec["header"].lower()
+            for hint in unmatched_hints:
+                if hint in header_lower or header_lower in hint:
+                    matched_sections.append(sec)
+                    matched_indices.add(idx)
+                    break
+
+    if not matched_sections:
+        return None
+
+    # 2E: Chunk expansion — include parent ## if we only matched ### children
+    parent_indices: set = set()
+    for sec in matched_sections:
+        if sec["level"] == 3:
+            # Find parent ##
+            sec_start = sec["start"]
+            for idx, s in enumerate(section_map):
+                if s["level"] == 2 and s["start"] < sec_start:
+                    candidate_idx = idx
+                    candidate = s
+            # Add parent header line only (not content)
+            if candidate_idx not in matched_indices:
+                parent_indices.add(candidate_idx)
+
+    # Collect lines to include
+    include_lines: set = set()
+
+    # Always include atom title (first # line) and Related line
+    for i, line in enumerate(lines):
+        if line.startswith("# ") and not line.startswith("## "):
+            include_lines.add(i)
+            break
+    rm = _RELATED_LINE_RE.search(content)
+    if rm:
+        rel_line_no = content[:rm.start()].count("\n")
+        include_lines.add(rel_line_no)
+
+    # Include matched section lines (with expansion for bullet context)
+    for sec in matched_sections:
+        for i in range(sec["start"], sec["end"]):
+            include_lines.add(i)
+
+    # Include parent ## header lines (just the header, not content)
+    for pidx in parent_indices:
+        include_lines.add(section_map[pidx]["start"])
+
+    # Check 70% threshold
+    if len(include_lines) >= total_lines * 0.70:
+        return None
+
+    # Build output
+    omitted = len(section_map) - len(matched_sections) - len(parent_indices)
+    output_lines: List[str] = []
+    sorted_lines = sorted(include_lines)
+
+    prev = -1
+    for i in sorted_lines:
+        if prev >= 0 and i > prev + 1:
+            # Gap marker (only if significant gap)
+            pass
+        output_lines.append(lines[i])
+        prev = i
+
+    if omitted > 0:
+        atom_file = ""
+        for line in lines:
+            if line.startswith("# "):
+                break
+        output_lines.append(f"\n[+{omitted} sections omitted]")
+
+    result = "\n".join(output_lines)
+    return result
+
+
 # ─── _AIDocs Index Parsing (v2.10) ──────────────────────────────────────────
 
 AiDocsEntry = Tuple[str, str, List[str]]  # (filename, description, keywords)

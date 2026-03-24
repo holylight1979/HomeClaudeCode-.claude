@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 架構細節, vector service, ollama backend, extraction, ACT-R, episodic tracking, context budget
 - Last-used: 2026-03-24
-- Confirmations: 82
+- Confirmations: 84
 - Type: decision
 - Tags: architecture, infrastructure
 - Related: decisions, toolchain, toolchain-ollama, doc-index-system, silent-failures
@@ -68,6 +68,14 @@
 - [固] SessionStart：`_detect_rut_patterns()` 掃描最近 N 個 episodic（共用 oscillation_window），同一信號出現 ≥ 2 sessions → 注入 `[Guardian:覆轍]`
 - [固] 職責切分：session 內重試 → fix-escalation；atom 反覆修改 → 震盪偵測；跨 session 行為模式 → 覆轍偵測
 
+### Section-Level 注入（V2.18）
+- [固] `ranked_search_sections()`：groupby atom 保留 top-3 chunks，回傳 `sections: [{section, text, score, line_number}]`
+- [固] `_semantic_search()` 4-tuple 回傳：`(name, path, triggers, sections)`，先試 `/search/ranked-sections`，404 fallback `/search/ranked`
+- [固] `_extract_sections()`：regex 解析 `##`/`###` section map → 匹配 hints（精確+子字串 fuzzy）→ 保留 atom 標題 + Related 行 + 匹配 sections
+- [固] SECTION_INJECT_THRESHOLD = 300 tokens，低於此值全量注入
+- [固] 安全閥：匹配 0 section → None → 全量；提取 ≥ 原文 70% → None → 全量
+- [固] 實測：decisions-architecture 963→305 tok（省 69%）、decisions 488→67 tok（省 87%）
+
 ### 環境維護
 - [固] rules/ 模組化：CLAUDE.md ~50 行，4 規則檔自動載入
 - [固] Atom 健康度：atom-health-check.py（Related 完整性 + 懸空引用 + 過期掃描）
@@ -88,3 +96,4 @@
 | 2026-03-22 | 新增自我迭代自動化（V2.16）段落（7 條 [固]） | V2.16 文件同步 |
 | 2026-03-22 | 新增覆轍偵測（V2.17）段落（4 條 [觀]） | 覆轍偵測實作 |
 | 2026-03-23 | V2.17 合併升級至公司電腦 | 跨機合併 |
+| 2026-03-24 | 新增 Section-Level 注入（V2.18）段落（6 條 [固]） | Phase 2 實作 |

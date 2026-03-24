@@ -48,6 +48,7 @@ from wg_atoms import (
     _find_atom_path, spread_related, compute_activation,
     _kw_match, match_triggers, compute_token_budget,
     _STRIP_META_RE, _STRIP_SECTION_RE, _strip_atom_for_injection,
+    SECTION_INJECT_THRESHOLD, _extract_sections,
     load_atoms_within_budget, _truncate_context_by_activation,
     parse_aidocs_index, extract_aidocs_keywords,
 )
@@ -429,7 +430,13 @@ def handle_user_prompt_submit(
     # ── Semantic search (supplement, ranked by intent v2.1) ──────
     kw_matched_names = {e[0][0] for e in matched_with_dir}
     sem_atoms = _semantic_search(prompt, config, intent=intent)
-    for sem_name, sem_path, _ in sem_atoms:
+    # v2.18: Build section hints map from semantic search results
+    section_hints: Dict[str, List[Dict]] = {}
+    for sem_entry in sem_atoms:
+        sem_name, sem_path = sem_entry[0], sem_entry[1]
+        sem_sections = sem_entry[3] if len(sem_entry) > 3 else []
+        if sem_sections:
+            section_hints[sem_name] = sem_sections
         if sem_name in kw_matched_names or sem_name in already_injected:
             continue
         # Find the base_dir for this atom from all_atoms
@@ -489,6 +496,14 @@ def handle_user_prompt_submit(
 
             content = _strip_atom_for_injection(content)
             content_tokens = len(content) // 4  # char-to-token estimate
+
+            # v2.18: Section-level injection when hints available and atom is large enough
+            if name in section_hints and content_tokens > SECTION_INJECT_THRESHOLD:
+                extracted = _extract_sections(content, section_hints[name])
+                if extracted is not None:
+                    content = extracted
+                    content_tokens = len(content) // 4
+
             if used_tokens + content_tokens <= budget:
                 atom_lines.append(f"[Atom:{name}]\n{content}")
                 newly_injected.append(name)
