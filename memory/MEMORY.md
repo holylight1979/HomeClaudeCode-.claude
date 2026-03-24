@@ -26,3 +26,4 @@
 | fix-escalation | memory/feedback_fix_escalation.md | 重試, retry, escalation, 精確修正, fix-escalation, 修不好, 又壞了, 失敗 |
 | fail-misdiagnosis | memory/failures/misdiagnosis-verify-first.md | 誤診, 驗證優先, verify first, 診斷失敗, 先射箭再畫靶, 假設錯誤就規劃, 過度規劃, 沒驗證就動手 |
 | mail-sorting | memory/mail-sorting.md | Mail2000, 信箱整理, 歸信, sort mail, 信件分類 |
+| feedback-no-test-to-svn | memory/feedback_no_test_to_svn.md | 上SVN, svn commit, 測試碼, 新手作業, 練習, 不可上傳 |
