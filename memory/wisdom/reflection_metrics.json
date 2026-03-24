@@ -12,12 +12,12 @@
       },
       "architecture": {
         "correct": 1,
-        "total": 14
+        "total": 15
       }
     },
     "over_engineering_rate": {
       "user_reverted_or_simplified": 0,
-      "total_suggestions": 73
+      "total_suggestions": 74
     },
     "silence_accuracy": {
       "held_back_ok": 61,
@@ -28,5 +28,5 @@
     "architecture 首次正確率 7%"
   ],
   "arch_sensitivity_elevated": true,
-  "last_reflection": "2026-03-24T11:41:36.464682+00:00"
+  "last_reflection": "2026-03-24T11:55:09.537595+00:00"
 }

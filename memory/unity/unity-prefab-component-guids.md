@@ -28,7 +28,13 @@ type: reference
 | GraphicRaycaster | `dc42784cf147c0c48a680349fa168899` | Canvas 必備 |
 | Image | `fe87c0e1cc204ed48ad3b37840f39efc` | 圖片/按鈕背景 |
 | RawImage | `1344c3c82d62a2a41a3576d8abb8e3ea` | 原始圖片 |
+| Text | `5f7201a12d95ffc409449d95f23cf332` | 文字元件 |
 | Button | `4e29b1a8efbd4b44bb3f3716e73f07ff` | Unity 原生按鈕 |
+| ScrollRect | `1aa08ab6e0800fa44ae55d278d1423e3` | 捲動區域 |
+| ContentSizeFitter | `3245ec927659c4140ac4f8d17403cc18` | 內容尺寸適配 |
+| VerticalLayoutGroup | `30649d3a9faa99c48a7b1166b86bf2a0` | 垂直排版 |
+| HorizontalLayoutGroup | `59f8146938fff824cb5fd77236b75775` | 水平排版 |
+| LayoutElement | `306cc8c2b49d7114eaa3623786fc2126` | 排版元素 |
 
 ### 第三方
 

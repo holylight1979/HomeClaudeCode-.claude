@@ -92,6 +92,10 @@ UI_GUIDS = {
     "EnhancedScroller":       "9c1b74f910281224a8cae6d8e4fc1f43",
     "Text":                   "5f7201a12d95ffc409449d95f23cf332",
     "ScrollRect":             "1aa08ab6e0800fa44ae55d278d1423e3",
+    "ContentSizeFitter":      "3245ec927659c4140ac4f8d17403cc18",
+    "VerticalLayoutGroup":    "30649d3a9faa99c48a7b1166b86bf2a0",
+    "HorizontalLayoutGroup":  "59f8146938fff824cb5fd77236b75775",
+    "LayoutElement":          "306cc8c2b49d7114eaa3623786fc2126",
 }
 
 UNITY_YAML_HEADER = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
