@@ -126,7 +126,6 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         if kq_count > 0:
             items = [q["content"][:40] for q in state["knowledge_queue"][:3]]
             lines.append(f"Pending knowledge: {'; '.join(items)}")
-        lines.append("Remember: check CLAUDE.md sync rules before ending.")
     else:
         state = new_state(session_id, cwd, source)
 
@@ -167,20 +166,14 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         p_names = [n for n, _, _ in project_atoms]
         lines = [
             "[Workflow Guardian] Active.",
-            f"Global atoms: {', '.join(g_names) if g_names else 'none'}.",
+            f"Global: {len(g_names)} atoms. Project: {len(p_names)}.",
         ]
-        if p_names:
-            lines.append(f"Project atoms: {', '.join(p_names)}.")
-        lines.append("I will track file modifications and remind you to sync before ending.")
 
-        # Inject compact _AIDocs index (v2.10)
+        # Inject compact _AIDocs index (v2.10, v2.18 trimmed)
         max_entries = config.get("aidocs", {}).get("max_session_start_entries", 15)
         if aidocs_entries:
-            aidocs_lines = [f"[AIDocs] {len(aidocs_entries)} docs in _AIDocs/:"]
-            for fname, desc, _kw in aidocs_entries[:max_entries]:
-                clean = re.sub(r"[*~`]", "", desc).strip()
-                aidocs_lines.append(f"  - {fname}: {clean[:80]}")
-            lines.extend(aidocs_lines)
+            fnames = [f for f, _d, _kw in aidocs_entries[:max_entries]]
+            lines.append(f"[AIDocs] {len(aidocs_entries)} docs: {', '.join(fnames)}")
 
     # ── V2.6: Periodic review check ─────────────────────────────────────
     try:
@@ -405,8 +398,13 @@ def handle_user_prompt_submit(
             if aliases and any(alias in prompt_lower for alias in aliases):
                 try:
                     mem_text = (cross_mem / MEMORY_INDEX).read_text(encoding="utf-8-sig")
+                    # v2.18: Strip index table from ProjectMemory injection
+                    mem_lines = mem_text.split("\n")
+                    mem_lines = [l for l in mem_lines if not (l.startswith("|") and "|" in l[1:])]
+                    mem_text = "\n".join(l for l in mem_lines if l.strip()).strip()
                     lines.append(f"[Guardian:AliasMatch] {proj_dir.name} matched via alias")
-                    lines.append(f"[ProjectMemory:{proj_dir.name}]\n{mem_text}")
+                    if mem_text:
+                        lines.append(f"[ProjectMemory:{proj_dir.name}]\n{mem_text}")
                     alias_injected_projects.add(proj_dir.name)
                 except (OSError, UnicodeDecodeError):
                     pass
