@@ -20,6 +20,7 @@
 | unity-yaml | memory/unity/unity-yaml.md | Unity YAML, fileID, GUID, PrefabInstance, .prefab, .meta, 型別ID, 序列化, Missing Script |
 | unity-prefab-component-guids | memory/unity/unity-prefab-component-guids.md | prefab GUID, component GUID, m_Script, ILUIWnd GUID, UIButtonCustom GUID, EnhancedScroller GUID, UI component registry |
 | unity-wndform-yaml-template | memory/unity/unity-wndform-yaml-template.md | WndForm template, prefab YAML, RefDb, AutoGenUICode, Scroller stack, Canvas template, prefab 建立 |
+| unity-prefab-workflow | memory/unity/unity-prefab-workflow.md | prefab SOP, 程式化建立 prefab, generate-ui-prefab, WndForm 建立, 元件 stack, Console 警告 |
 | gdoc-harvester | memory/gdoc-harvester.md | harvester, Google Docs, Sheets, 收割, Playwright, cookie, export |
 | feedback-research | memory/feedback_research_first.md | 試錯, trial-and-error, 不熟悉, API試錯, 框架不熟, 搜尋策略, research |
 | doc-index-system | memory/doc-index-system.md | 記憶系統架構, 檔案結構, hook, skill, tool, 記憶升級, 記憶迭代, 目錄結構 |

@@ -1,10 +1,13 @@
----
-name: unity-prefab-workflow
-description: SOP for programmatic WndForm/Widget prefab creation — from JSON spec to validated YAML
-type: reference
----
+# Prefab 程式化建立 SOP
 
-## Prefab 程式化建立 SOP
+- Scope: global
+- Confidence: [臨]
+- Trigger: prefab SOP, 程式化建立 prefab, generate-ui-prefab, WndForm 建立
+- Last-used: 2026-03-24
+- Confirmations: 2
+- Related: unity-yaml, unity-prefab-component-guids, unity-wndform-yaml-template
+
+## 知識
 
 ### 工具鏈
 
@@ -45,14 +48,19 @@ python unity-yaml-tool.py validate Assets/Res/UI/WndForm/WndForm_XXX.prefab
 
 檢查：fileID 交叉引用、m_Script 非零、m_GameObject 引用
 
-### Step 4: Unity 在線驗證（需關閉 Unity Editor）
+### Step 4: Unity 在線驗證
 
+**方法 A — Unity Editor 已開啟（推薦）**：
+1. 存檔後切回 Unity → 自動 Refresh
+2. 若 prefab 正在 Prefab Mode 中開啟 → Unity 彈出 "Prefab has Been Changed on Disk" 對話框 → 點 **"Discard Changes"** 載入新版
+3. 檢查 Console：先按 **Clear** 清掉舊訊息，確認無新 Warning/Error
+4. 用 MCPControl 或 PowerShell 截圖確認 Console 狀態
+
+**方法 B — Unity Editor 關閉時（batch mode）**：
 ```bash
 python unity_batch.py -p sgi_client/client -m ClaudeEditorHelper.RefreshAssets
 python unity_batch.py -p sgi_client/client -m ClaudeEditorHelper.ValidatePrefab --extra-args "-prefab Assets/Res/UI/WndForm/WndForm_XXX.prefab"
 ```
-
-如果 Unity Editor 已開啟：切回 Unity → 會自動 Refresh → 檢查 Console 是否有紅字
 
 ### Step 5: AutoGenUICode
 
@@ -62,10 +70,95 @@ python unity_batch.py -p sgi_client/client -m ClaudeEditorHelper.AutoGenUICode -
 
 產出：InitComp.cs + UIEvent.cs
 
+### 元件組裝 Stack（Phase 2A 實測確認）
+
+> **關鍵原則**：每個 UI 類型有固定的元件 stack。缺少任何一個 → Unity Console 出現 "has possibly missing Required Components!" 警告。
+> **GUID 為專案專屬**：每個 Unity 專案的 .cs.meta GUID 不同，見 `unity-prefab-component-guids` atom。
+
+#### Root（WndForm）
+
+| # | 元件 | 備註 |
+|---|------|------|
+| 1 | RectTransform | Anchor: stretch, Pivot: 0.5/0.5 |
+| 2 | Canvas | RenderMode: 2 (ScreenSpaceCamera) |
+| 3 | GraphicRaycaster | 使用 MonoBehaviour 114 |
+| 4 | CanvasGroup | Alpha: 1, Interactable: true |
+| 5 | UIPerformance | 使用 MonoBehaviour 114 |
+| 6 | ILUIWnd | 包含 RefDb + _uiWndID |
+
+#### UIButtonCustom（普通按鈕）
+
+| # | 元件 | YAML Type | 備註 |
+|---|------|-----------|------|
+| 1 | RectTransform | !u!224 | |
+| 2 | CanvasRenderer | !u!222 | |
+| 3 | **EmptyGraphic** | !u!114 | guid: `2db8e84a`... — 透明 Graphic，僅供 Raycast 點擊區域 |
+| 4 | **UIButtonCustom** | !u!114 | guid: `89779232`... — `[RequireComponent(typeof(EmptyGraphic))]` |
+| 5 | CanvasGroup | !u!225 | |
+
+- UIButtonCustom 的 `[RequireComponent]` 指定 **EmptyGraphic**，不可用 Unity Image 替代
+- EmptyGraphic 來源：`Assets/MainScripts/Framework/UIComponent/EmptyGraphic.cs`
+
+#### Toggle 按鈕（帶狀態切換）
+
+| # | 元件 | YAML Type | 備註 |
+|---|------|-----------|------|
+| 1 | RectTransform | !u!224 | |
+| 2 | CanvasRenderer | !u!222 | |
+| 3 | EmptyGraphic | !u!114 | guid: `2db8e84a`... |
+| 4 | **UJToggle** | !u!114 | guid: `37cc876e`... — Toggle 子類 |
+| 5 | UIButtonCustom | !u!114 | guid: `89779232`... |
+| 6 | CanvasGroup | !u!225 | |
+
+- UJToggle 繼承 Unity Toggle，來源：`Assets/MainScripts/Game/UIComponent/UJToggle.cs`
+- 僅用於需要 toggle 狀態的按鈕（如 tab 頁籤切換）
+
+#### Scroller（捲動列表）
+
+| # | 元件 | YAML Type | 備註 |
+|---|------|-----------|------|
+| 1 | RectTransform | !u!224 | |
+| 2 | **ScrollRect** | !u!114 | guid: `1aa08ab6`... — m_Content/m_Viewport 設 {fileID: 0} |
+| 3 | **EnhancedScroller** | !u!114 | guid: `9c1b74f9`... — `[RequireComponent(typeof(ScrollRect))]` |
+| 4 | CanvasRenderer | !u!222 | |
+| 5 | **Image** | !u!114 | guid: `fe87c0e1`... — 為 Mask 提供 Graphic |
+| 6 | **Mask** | !u!114 | guid: `31a19414`... — m_ShowMaskGraphic: 0 |
+| 7 | ILUIScrollerController | !u!114 | guid: `38afe61a`... |
+
+- ScrollRect 設定：m_Horizontal: 0, m_Vertical: 1, m_MovementType: 2
+
+#### Text
+
+| # | 元件 | YAML Type | 備註 |
+|---|------|-----------|------|
+| 1 | RectTransform | !u!224 | |
+| 2 | CanvasRenderer | !u!222 | |
+| 3 | Text | !u!114 | guid: `5f7201a1`... |
+
+### 診斷流程：Console 警告排查
+
+**"has possibly missing Required Components!"**：
+1. 從警告找 GameObject 名稱
+2. 在 prefab YAML 找該 GO 的 `m_Component` 列表
+3. 查 MonoBehaviour GUID → 找 .cs 源碼
+4. `grep -n "RequireComponent"` → 找缺少的元件 → 加入 YAML
+
 ### 注意事項
 
-- Root 自動建立 6 元件：RectTransform + Canvas + GraphicRaycaster + CanvasGroup + UIPerformance + ILUIWnd
-- RefDb 自動從 children 建立，_key = child name, _typeName = child type
-- Scroller 需要 3 元件：EnhancedScroller + ILUIScrollerController（在同一 GO）
-- ScrollerCell widget 需要另外建立
-- 所有 UI 物件 m_Layer = 5（UI layer）
+- RefDb 的 _typeName 要與元件的 C# class name 一致
+- EmptyGraphic 序列化格式比 Image 簡單（無 m_Sprite、m_Type 等欄位）
+- generate-ui-prefab 工具的 UIButtonCustom/Scroller 輸出有已知問題，需參照本 atom stack 修正
+- 測試/練習用的 prefab 不上傳 SVN
+
+## 行動
+
+- 建立 prefab → 依照 5 步驟 SOP 執行
+- Console 有 "missing Required Components" → 按診斷流程排查
+- 不確定元件 stack → 查本 atom 對應 UI 類型表
+
+## 演化日誌
+
+| 日期 | 變更 | 來源 |
+|------|------|------|
+| 2026-03-24 | 初始建立（claude-native 格式） | Phase 2A 實測 |
+| 2026-03-25 | 格式修正：claude-native → 原子記憶標準格式 | memory-health 診斷 |

@@ -91,6 +91,8 @@ UI_GUIDS = {
     "Button":                 "4e29b1a8efbd4b44bb3f3716e73f07ff",
     "EnhancedScroller":       "9c1b74f910281224a8cae6d8e4fc1f43",
     "Text":                   "5f7201a12d95ffc409449d95f23cf332",
+    "EmptyGraphic":           "2db8e84a7ad1bcd478233499422f2496",
+    "Mask":                   "31a19414c41e5ae4aae2af33fee712f6",
     "ScrollRect":             "1aa08ab6e0800fa44ae55d278d1423e3",
     "ContentSizeFitter":      "3245ec927659c4140ac4f8d17403cc18",
     "VerticalLayoutGroup":    "30649d3a9faa99c48a7b1166b86bf2a0",
@@ -1096,30 +1098,96 @@ def generate_ui_prefab(spec: dict, output_path: str):
 
         elif child_type == "UIButtonCustom":
             btn_guid = UI_GUIDS.get("UIButtonCustom")
-            img_guid = UI_GUIDS.get("Image")
-            if btn_guid:
+            eg_guid = UI_GUIDS.get("EmptyGraphic")
+            if btn_guid and eg_guid:
+                # CanvasRenderer
                 cr_obj, cr_id = make_canvas_renderer(go_id_placeholder)
                 extra_objs.append(cr_obj)
                 extra_comp_ids.append(cr_id)
-                # Image background
-                if img_guid:
-                    img_obj, img_id = make_mono(go_id_placeholder, img_guid)
-                    extra_objs.append(img_obj)
-                    extra_comp_ids.append(img_id)
+                # EmptyGraphic (UIButtonCustom [RequireComponent])
+                eg_obj, eg_id = make_mono(go_id_placeholder, eg_guid, {
+                    "m_Material": {"fileID": 0},
+                    "m_Color": {"r": 1, "g": 1, "b": 1, "a": 1},
+                    "m_RaycastTarget": 1,
+                    "m_RaycastPadding": {"x": 0, "y": 0, "z": 0, "w": 0},
+                })
+                extra_objs.append(eg_obj)
+                extra_comp_ids.append(eg_id)
                 # UIButtonCustom
                 mono_obj, mono_id = make_mono(go_id_placeholder, btn_guid)
                 extra_objs.append(mono_obj)
                 extra_comp_ids.append(mono_id)
                 refdb_comp_id = mono_id
+                # CanvasGroup
+                cg_obj, cg_id = make_canvas_group(go_id_placeholder)
+                extra_objs.append(cg_obj)
+                extra_comp_ids.append(cg_id)
 
         elif child_type == "Scroller":
             scroller_guid = UI_GUIDS.get("EnhancedScroller")
             ctrl_guid = UI_GUIDS.get("ILUIScrollerController")
-            if scroller_guid and ctrl_guid:
+            sr_guid = UI_GUIDS.get("ScrollRect")
+            img_guid = UI_GUIDS.get("Image")
+            mask_guid = UI_GUIDS.get("Mask")
+            if scroller_guid and ctrl_guid and sr_guid:
+                # ScrollRect (EnhancedScroller [RequireComponent])
+                sr_obj, sr_id = make_mono(go_id_placeholder, sr_guid, {
+                    "m_Content": {"fileID": 0},
+                    "m_Horizontal": 0,
+                    "m_Vertical": 1,
+                    "m_MovementType": 2,
+                    "m_Elasticity": 0.1,
+                    "m_Inertia": 1,
+                    "m_DecelerationRate": 0.135,
+                    "m_ScrollSensitivity": 1,
+                    "m_Viewport": {"fileID": 0},
+                    "m_HorizontalScrollbar": {"fileID": 0},
+                    "m_VerticalScrollbar": {"fileID": 0},
+                    "m_HorizontalScrollbarVisibility": 0,
+                    "m_VerticalScrollbarVisibility": 0,
+                    "m_HorizontalScrollbarSpacing": 0,
+                    "m_VerticalScrollbarSpacing": 0,
+                    "m_OnValueChanged": {"m_PersistentCalls": {"m_Calls": []}},
+                })
+                extra_objs.append(sr_obj)
+                extra_comp_ids.append(sr_id)
                 # EnhancedScroller
                 es_obj, es_id = make_mono(go_id_placeholder, scroller_guid)
                 extra_objs.append(es_obj)
                 extra_comp_ids.append(es_id)
+                # CanvasRenderer (for Image)
+                cr_obj, cr_id = make_canvas_renderer(go_id_placeholder)
+                extra_objs.append(cr_obj)
+                extra_comp_ids.append(cr_id)
+                # Image (Mask needs a Graphic)
+                if img_guid:
+                    scr_img_obj, scr_img_id = make_mono(go_id_placeholder, img_guid, {
+                        "m_Material": {"fileID": 0},
+                        "m_Color": {"r": 1, "g": 1, "b": 1, "a": 1},
+                        "m_RaycastTarget": 1,
+                        "m_RaycastPadding": {"x": 0, "y": 0, "z": 0, "w": 0},
+                        "m_Maskable": 1,
+                        "m_OnCullStateChanged": {"m_PersistentCalls": {"m_Calls": []}},
+                        "m_Sprite": {"fileID": 0},
+                        "m_Type": 0,
+                        "m_PreserveAspect": 0,
+                        "m_FillCenter": 1,
+                        "m_FillMethod": 4,
+                        "m_FillAmount": 1,
+                        "m_FillClockwise": 1,
+                        "m_FillOrigin": 0,
+                        "m_UseSpriteMesh": 0,
+                        "m_PixelsPerUnitMultiplier": 1,
+                    })
+                    extra_objs.append(scr_img_obj)
+                    extra_comp_ids.append(scr_img_id)
+                # Mask
+                if mask_guid:
+                    mask_obj, mask_id = make_mono(go_id_placeholder, mask_guid, {
+                        "m_ShowMaskGraphic": 0,
+                    })
+                    extra_objs.append(mask_obj)
+                    extra_comp_ids.append(mask_id)
                 # ILUIScrollerController
                 scroll_class = child_spec.get("scroll_class", "")
                 ctrl_obj, ctrl_id = make_mono(go_id_placeholder, ctrl_guid, {

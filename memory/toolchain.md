@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 工具鏈, 環境設定, bash指令, command, bash, git, python, npm
-- Last-used: 2026-03-24
-- Confirmations: 94
+- Last-used: 2026-03-25
+- Confirmations: 100
 - Type: procedural
 - Tags: toolchain, environment, commands
 - Related: fail-env, toolchain-ollama, decisions-architecture, doc-index-system
@@ -31,6 +31,16 @@
 - [固] LanceDB 資料: `~/.claude/memory/_vectordb/`
 
 ### Ollama Dual-Backend → 詳見 `toolchain-ollama.md`
+
+### MCP Server：MCPControl（computer-use-mcp）
+
+- [固] 全域安裝：`npm i -g computer-use-mcp`，目前版本 1.7.1
+- [固] 功能：螢幕截圖、滑鼠點擊/拖曳、鍵盤輸入、捲動 — 可操控任何桌面應用程式
+- [固] 工具名稱：`mcp__MCPControl__computer`（action: get_screenshot / left_click / type / key 等）
+- [固] **跨專案可用**：不限於特定專案，任何 session 都能用來檢視畫面、操控 UI（包括 Unity Editor、瀏覽器、任意桌面 App）
+- [固] 常見用途：Unity Editor UI 驗證、截圖比對、自動化 GUI 操作、協助使用者確認視覺結果
+- [固] **使用者明確要求**：需要看畫面時優先用 MCPControl，不要說「看不到」。若 MCPControl 未連線，fallback 用 PowerShell 截圖：`CopyFromScreen` → 存 PNG → Read tool 讀取
+- [固] PowerShell 截圖配方：`Add-Type System.Windows.Forms + System.Drawing` → `Bitmap` → `Graphics.CopyFromScreen` → `.Save()`；可 `Bitmap.Clone(Rectangle)` 裁切特定區域
 
 ### 環境特殊配置
 

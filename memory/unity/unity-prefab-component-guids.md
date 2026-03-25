@@ -1,13 +1,13 @@
 ---
 name: unity-prefab-component-guids
-description: Unity UI component script GUID registry for programmatic prefab creation (SGI Client project)
+description: SGI Client 專案專屬的 UI component script GUID 對照表（不適用其他 Unity 專案）
 type: reference
 ---
 
 ## UI Component Script GUIDs (SGI Client, Unity 2022.3.62f2)
 
+> **專案專屬**：這些 GUID 來自 SGI Client 專案的 .cs.meta / .dll.meta，不同 Unity 專案的 GUID 完全不同。
 > 用途：程式化建立/修改 .prefab YAML 時，MonoBehaviour 的 m_Script 欄位需要正確的 GUID。
-> 來源：從專案 .cs.meta 和 .dll.meta 提取，非硬編碼。
 
 ### 核心 UI 框架
 
@@ -20,6 +20,17 @@ type: reference
 | UIPerformance | `e462dac500424c5439978c56da2c7c27` | `Assets/MainScripts/.../UIPerformance.cs` |
 | UIButtonCustom | `89779232b761c444897d167013b46555` | `Assets/MainScripts/.../DoozyExtension/Component/UIButtonCustom.cs` |
 | UIButton (Doozy) | `7d12bfc32d0d797428cf0191288caabd` | `Assets/MainScripts/.../Doozy/Engine/UI/UIButton/UIButton.cs` |
+| EmptyGraphic | `2db8e84a7ad1bcd478233499422f2496` | `Assets/MainScripts/Framework/UIComponent/EmptyGraphic.cs` |
+| UJToggle | `37cc876e277f93d4685c49829def45af` | `Assets/MainScripts/Game/UIComponent/UJToggle.cs` |
+| Mask | `31a19414c41e5ae4aae2af33fee712f6` | Unity 內建 `UnityEngine.UI.Mask` |
+
+### RequireComponent 依賴（實測確認）
+
+| Component | Requires | 備註 |
+|-----------|----------|------|
+| UIButtonCustom | EmptyGraphic + RectTransform | 來源: UIButtonCustom.cs line 30-31 |
+| EnhancedScroller | ScrollRect | ScrollRect + CanvasRenderer + Image + Mask 完整 stack |
+| UJToggle | Graphic (any) | Toggle 子類，需 targetGraphic；僅 toggle 按鈕用 |
 
 ### Unity 內建 UI (from UnityEngine.UI DLL)
 
@@ -50,6 +61,113 @@ m_Script: {fileID: 11500000, guid: <GUID>, type: 3}
 ```
 - fileID 固定 `11500000`
 - type 固定 `3`（MonoScript 參照）
+
+### 元件序列化範本（最小欄位集）
+
+**EmptyGraphic**（按鈕用，透明 Graphic 僅供 Raycast）：
+```yaml
+--- !u!114 &<fileID>
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: <parent_GO>}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2db8e84a7ad1bcd478233499422f2496, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  m_Material: {fileID: 0}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+```
+
+**ScrollRect**（Scroller 用，vertical-only 預設）：
+```yaml
+--- !u!114 &<fileID>
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: <parent_GO>}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1aa08ab6e0800fa44ae55d278d1423e3, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  m_Content: {fileID: 0}
+  m_Horizontal: 0
+  m_Vertical: 1
+  m_MovementType: 2
+  m_Elasticity: 0.1
+  m_Inertia: 1
+  m_DecelerationRate: 0.135
+  m_ScrollSensitivity: 1
+  m_Viewport: {fileID: 0}
+  m_HorizontalScrollbar: {fileID: 0}
+  m_VerticalScrollbar: {fileID: 0}
+  m_HorizontalScrollbarVisibility: 0
+  m_VerticalScrollbarVisibility: 0
+  m_HorizontalScrollbarSpacing: 0
+  m_VerticalScrollbarSpacing: 0
+  m_OnValueChanged:
+    m_PersistentCalls:
+      m_Calls: []
+```
+
+**Mask**（Scroller 遮罩用）：
+```yaml
+--- !u!114 &<fileID>
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: <parent_GO>}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31a19414c41e5ae4aae2af33fee712f6, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  m_ShowMaskGraphic: 0
+```
+
+**Image**（完整序列化，Scroller 的 Mask Graphic 或一般圖片用）：
+```yaml
+--- !u!114 &<fileID>
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: <parent_GO>}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  m_Material: {fileID: 0}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 0}
+  m_Type: 0
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
+```
 
 ### Unity YAML Type IDs (built-in)
 
