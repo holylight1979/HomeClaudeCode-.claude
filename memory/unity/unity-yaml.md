@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: Unity YAML, fileID, GUID, PrefabInstance, .prefab, .meta, 型別ID, 序列化, Missing Script
 - Last-used: 2026-03-27
-- Confirmations: 16
+- Confirmations: 17
 - Type: semantic
 - Tags: unity, yaml, serialization, prefab, guid
 - Related: unity-prefab-workflow, unity-yaml-detail
