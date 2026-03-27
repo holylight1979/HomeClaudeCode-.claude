@@ -3,6 +3,9 @@ wg_core.py — Workflow Guardian 共用基礎模組
 
 常數、設定載入、State I/O、Output helpers、Debug logging。
 所有 wg_*.py 模組共用此檔。
+
+V2.20: 路徑相關常數/函式已移至 wg_paths.py。
+本模組 re-export 以維持向後相容（下一版移除）。
 """
 
 import json
@@ -15,14 +18,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ─── Constants ───────────────────────────────────────────────────────────────
+# ─── Path constants & functions (V2.20: delegated to wg_paths) ───────────────
+# Re-export for backward compatibility. Direct import from wg_paths preferred.
+from wg_paths import (  # noqa: F401
+    CLAUDE_DIR, MEMORY_DIR, EPISODIC_DIR, WORKFLOW_DIR, CONFIG_PATH,
+    MEMORY_INDEX,
+    cwd_to_project_slug, get_project_memory_dir, find_project_root,
+    get_project_claude_dir, get_transcript_path,
+    resolve_episodic_dir, resolve_failures_dir, resolve_staging_dir,
+    resolve_access_json, get_slug_pointer_path,
+    discover_all_project_memory_dirs, discover_memory_layers,
+    state_file_path,
+)
 
-CLAUDE_DIR = Path.home() / ".claude"
-WORKFLOW_DIR = CLAUDE_DIR / "workflow"
-MEMORY_DIR = CLAUDE_DIR / "memory"
-EPISODIC_DIR = MEMORY_DIR / "episodic"
-CONFIG_PATH = WORKFLOW_DIR / "config.json"
-MEMORY_INDEX = "MEMORY.md"
+# ─── Constants (non-path) ────────────────────────────────────────────────────
+
 CONTEXT_BUDGET_DEFAULT = 3000  # V2.11: default token cap
 
 # Defaults (overridable via config.json)
@@ -89,49 +99,12 @@ def _estimate_tokens(text: str) -> int:
     return int(cjk * 1.5 + ascii_part * 0.25)
 
 
-def cwd_to_project_slug(cwd: str) -> str:
-    """Convert CWD to Claude Code project slug.
-    C:\\Projects\\sgi-server → c--Projects-sgi-server
-    """
-    slug = cwd.replace(":", "-").replace("\\", "-").replace("/", "-").replace(".", "-")
-    if slug:
-        slug = slug[0].lower() + slug[1:]
-    return slug
-
-
-def get_project_memory_dir(cwd: str) -> Optional[Path]:
-    """Get project-level memory dir from CWD. Returns None if not found."""
-    if not cwd:
-        return None
-    slug = cwd_to_project_slug(cwd)
-    project_mem = CLAUDE_DIR / "projects" / slug / "memory"
-    if project_mem.exists():
-        return project_mem
-    return None
-
-
-def find_project_root(cwd: str) -> Optional[Path]:
-    """Walk up from CWD to find project root (contains _AIDocs/ or .git/ or .svn/)."""
-    if not cwd:
-        return None
-    p = Path(cwd)
-    for _ in range(4):  # cwd itself + max 3 levels up
-        if (p / "_AIDocs").is_dir():
-            return p
-        if (p / ".git").exists() or (p / ".svn").exists():
-            return p
-        parent = p.parent
-        if parent == p:
-            break
-        p = parent
-    return Path(cwd)  # fallback
-
-
 # ─── State File I/O ──────────────────────────────────────────────────────────
 
 
 def state_path(session_id: str) -> Path:
-    return WORKFLOW_DIR / f"state-{session_id}.json"
+    """Alias for wg_paths.state_file_path (backward compat)."""
+    return state_file_path(session_id)
 
 
 def read_state(session_id: str) -> Optional[Dict[str, Any]]:

@@ -25,13 +25,19 @@ from typing import Any, Dict, List, Optional, Tuple
 # ─── 確保模組搜尋路徑包含 hooks/ 目錄（runpy.run_path 不會自動加）─────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# ─── wg_core: shared constants, config, state I/O, output, debug ────────────
-from wg_core import (
+# ─── wg_paths: path constants & functions (V2.20 single source of truth) ─────
+from wg_paths import (
     CLAUDE_DIR, WORKFLOW_DIR, MEMORY_DIR, EPISODIC_DIR, CONFIG_PATH,
-    MEMORY_INDEX, CONTEXT_BUDGET_DEFAULT, DEFAULTS,
+    MEMORY_INDEX,
+    cwd_to_project_slug, get_project_memory_dir, find_project_root,
+    resolve_episodic_dir, resolve_failures_dir, resolve_staging_dir,
+    resolve_access_json, discover_all_project_memory_dirs,
+)
+# ─── wg_core: config, state I/O, output, debug ──────────────────────────────
+from wg_core import (
+    CONTEXT_BUDGET_DEFAULT, DEFAULTS,
     load_config,
-    _now_iso, _estimate_tokens, cwd_to_project_slug, get_project_memory_dir,
-    find_project_root,
+    _now_iso, _estimate_tokens,
     state_path, read_state, write_state, new_state, _ensure_state,
     output_json, output_nothing, output_block,
     _atom_debug_log, _atom_debug_error,
@@ -385,39 +391,34 @@ def handle_user_prompt_submit(
     loaded_proj_names = set()
     if proj_dir_str:
         loaded_proj_names.add(Path(proj_dir_str).parent.name)
-    projects_dir = CLAUDE_DIR / "projects"
-    if projects_dir.is_dir():
-        for proj_dir in projects_dir.iterdir():
-            if not proj_dir.is_dir() or proj_dir.name in loaded_proj_names:
-                continue
-            cross_mem = proj_dir / "memory"
-            if not cross_mem.exists():
-                continue
-            # v2.9: Check project aliases before trigger matching
-            aliases = parse_project_aliases(cross_mem)
-            if aliases and any(alias in prompt_lower for alias in aliases):
-                try:
-                    mem_text = (cross_mem / MEMORY_INDEX).read_text(encoding="utf-8-sig")
-                    # v2.18: Strip index table from ProjectMemory injection
-                    mem_lines = mem_text.split("\n")
-                    mem_lines = [l for l in mem_lines if not (l.startswith("|") and "|" in l[1:])]
-                    mem_text = "\n".join(l for l in mem_lines if l.strip()).strip()
-                    lines.append(f"[Guardian:AliasMatch] {proj_dir.name} matched via alias")
-                    if mem_text:
-                        lines.append(f"[ProjectMemory:{proj_dir.name}]\n{mem_text}")
-                    alias_injected_projects.add(proj_dir.name)
-                except (OSError, UnicodeDecodeError):
-                    pass
-            # Existing trigger-based cross-atom discovery
-            cross_atoms = parse_memory_index(cross_mem)
-            if not cross_atoms:
-                continue
-            cross_parent = cross_mem.parent
-            for name, rel_path, triggers in cross_atoms:
-                if name not in already_injected and sum(_kw_match(kw, prompt_lower) for kw in triggers) >= 2:
-                    all_atoms.append(((name, rel_path, triggers), cross_parent))
-                    # CrossProject match notification → debug log only
-                    _atom_debug_log("CrossProject", f"{proj_dir.name}/{name} matched", config)
+    # V2.20: use centralized discovery instead of direct path scan
+    for _cross_slug, cross_mem in discover_all_project_memory_dirs():
+        if _cross_slug in loaded_proj_names:
+            continue
+        # v2.9: Check project aliases before trigger matching
+        aliases = parse_project_aliases(cross_mem)
+        if aliases and any(alias in prompt_lower for alias in aliases):
+            try:
+                mem_text = (cross_mem / MEMORY_INDEX).read_text(encoding="utf-8-sig")
+                # v2.18: Strip index table from ProjectMemory injection
+                mem_lines = mem_text.split("\n")
+                mem_lines = [l for l in mem_lines if not (l.startswith("|") and "|" in l[1:])]
+                mem_text = "\n".join(l for l in mem_lines if l.strip()).strip()
+                lines.append(f"[Guardian:AliasMatch] {_cross_slug} matched via alias")
+                if mem_text:
+                    lines.append(f"[ProjectMemory:{_cross_slug}]\n{mem_text}")
+                alias_injected_projects.add(_cross_slug)
+            except (OSError, UnicodeDecodeError):
+                pass
+        # Existing trigger-based cross-atom discovery
+        cross_atoms = parse_memory_index(cross_mem)
+        if not cross_atoms:
+            continue
+        cross_parent = cross_mem.parent
+        for name, rel_path, triggers in cross_atoms:
+            if name not in already_injected and sum(_kw_match(kw, prompt_lower) for kw in triggers) >= 2:
+                all_atoms.append(((name, rel_path, triggers), cross_parent))
+                _atom_debug_log("CrossProject", f"{_cross_slug}/{name} matched", config)
     for (name, rel_path, triggers), base_dir in all_atoms:
         if name not in already_injected and any(_kw_match(kw, prompt_lower) for kw in triggers):
             matched_with_dir.append(((name, rel_path, triggers), base_dir))

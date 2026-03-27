@@ -12,9 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from wg_core import (
-    MEMORY_DIR, EPISODIC_DIR, MEMORY_INDEX, CONTEXT_BUDGET_DEFAULT,
-)
+from wg_paths import MEMORY_DIR, EPISODIC_DIR, MEMORY_INDEX, resolve_access_json
+from wg_core import CONTEXT_BUDGET_DEFAULT
 
 # ─── Memory Index Parsing ────────────────────────────────────────────────────
 

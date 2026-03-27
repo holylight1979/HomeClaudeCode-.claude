@@ -11,10 +11,12 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from wg_core import (
+from wg_paths import (
     CLAUDE_DIR, WORKFLOW_DIR, MEMORY_DIR,
-    get_project_memory_dir, _now_iso,
+    get_project_memory_dir, resolve_staging_dir,
+    discover_all_project_memory_dirs,
 )
+from wg_core import _now_iso
 
 
 # ─── Metrics Collection ─────────────────────────────────────────────────────
@@ -173,13 +175,11 @@ def _calculate_maturity_phase(config: Dict[str, Any]) -> Dict[str, Any]:
         if ep_dir.exists():
             total += sum(1 for _ in ep_dir.glob("episodic-*.md"))
 
-    # Also check project episodic dirs
-    projects_dir = CLAUDE_DIR / "projects"
-    if projects_dir.exists():
-        for proj in projects_dir.iterdir():
-            ep = proj / "memory" / "episodic"
-            if ep.exists():
-                total += sum(1 for _ in ep.glob("episodic-*.md"))
+    # Also check project episodic dirs (V2.20: via wg_paths)
+    for _slug, _mem_dir in discover_all_project_memory_dirs():
+        ep = _mem_dir / "episodic"
+        if ep.exists():
+            total += sum(1 for _ in ep.glob("episodic-*.md"))
 
     if total < learning_max:
         phase = "learning"
@@ -277,7 +277,8 @@ def _self_iterate_atoms(
 
     # Write archive candidates to staging
     if results["archive_candidates"]:
-        staging = MEMORY_DIR / "_staging"
+        cwd = state.get("session", {}).get("cwd", "")
+        staging = resolve_staging_dir(cwd)
         staging.mkdir(exist_ok=True)
         out_lines = [
             f"# Archive Candidates ({today.strftime('%Y-%m-%d')})\n",
@@ -382,12 +383,11 @@ def _check_periodic_review_due(config: Dict[str, Any]) -> Optional[str]:
     for ep_dir in [MEMORY_DIR / "episodic"]:
         if ep_dir.exists():
             total += sum(1 for _ in ep_dir.glob("episodic-*.md"))
-    projects_dir = CLAUDE_DIR / "projects"
-    if projects_dir.exists():
-        for proj in projects_dir.iterdir():
-            ep = proj / "memory" / "episodic"
-            if ep.exists():
-                total += sum(1 for _ in ep.glob("episodic-*.md"))
+    # V2.20: via wg_paths
+    for _slug, _mem_dir in discover_all_project_memory_dirs():
+        ep = _mem_dir / "episodic"
+        if ep.exists():
+            total += sum(1 for _ in ep.glob("episodic-*.md"))
 
     sessions_since_review = total - last_review_session_count
     if sessions_since_review >= review_interval:
