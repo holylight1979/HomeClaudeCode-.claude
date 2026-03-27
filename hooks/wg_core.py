@@ -120,11 +120,30 @@ def read_state(session_id: str) -> Optional[Dict[str, Any]]:
 
 
 def write_state(session_id: str, state: Dict[str, Any]) -> None:
-    """Atomic write: write to temp then rename."""
+    """Atomic write with advisory lock to prevent concurrent R-M-W races (C6).
+
+    Uses msvcrt.locking on Windows for advisory file locking (best-effort):
+    if lock acquisition fails, proceeds without lock — tmp+replace still
+    provides crash safety.
+    """
     WORKFLOW_DIR.mkdir(parents=True, exist_ok=True)
     state["last_updated"] = _now_iso()
     path = state_path(session_id)
     tmp_path = path.with_suffix(".tmp")
+    lock_path = path.with_suffix(".lock")
+
+    # Advisory lock (Windows only, best-effort)
+    lock_fh = None
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+            lock_fh = open(lock_path, "ab")
+            msvcrt.locking(lock_fh.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            if lock_fh:
+                lock_fh.close()
+            lock_fh = None  # Failed to acquire — proceed without lock
+
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
@@ -133,6 +152,18 @@ def write_state(session_id: str, state: Dict[str, Any]) -> None:
         if tmp_path.exists():
             try:
                 tmp_path.unlink()
+            except OSError:
+                pass
+    finally:
+        if lock_fh is not None:
+            try:
+                import msvcrt
+                msvcrt.locking(lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+            lock_fh.close()
+            try:
+                lock_path.unlink()
             except OSError:
                 pass
 

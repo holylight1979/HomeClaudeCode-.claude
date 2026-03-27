@@ -236,27 +236,51 @@ def handle_session_start(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
     except Exception as e:
         print(f"[mcp-health] Check error: {e}", file=sys.stderr)
 
-    # CRITICAL: write state + output BEFORE warmup, so even if warmup
-    # times out (and hook gets killed), state file exists for subsequent hooks.
+    # CRITICAL: write state before any output so subsequent hooks can read it.
     write_state(session_id, state)
 
-    output_json({
+    # ── Vector Service auto-start (before output — best-effort, quick) ──
+    # C5/W11 fix: _ensure_vector_service was dead code after output_json(exit).
+    # Now called before print so service starts even if warmup subprocess is slow.
+    if config.get("vector_search", {}).get("auto_start_service", True):
+        try:
+            _ensure_vector_service(config)
+        except Exception as e:
+            _atom_debug_error("注入:vector_service_start", e)
+
+    # C5/W11 fix: print directly (not via output_json which exits),
+    # then spawn warmup as fire-and-forget subprocess, then exit.
+    print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
             "additionalContext": "\n".join(lines),
         }
-    })
+    }, ensure_ascii=False))
 
-    # ── Vector Service auto-start + warmup (best-effort, after state saved) ──
+    # ── Vector warmup (fire-and-forget subprocess, non-blocking) ──────────
     if config.get("vector_search", {}).get("auto_start_service", True):
-        _ensure_vector_service(config)
         try:
             vs_port = config.get("vector_search", {}).get("service_port", 3849)
             warmup_url = f"http://127.0.0.1:{vs_port}/search?q=warmup&top_k=1&min_score=0.99"
-            warmup_req = urllib.request.Request(warmup_url)
-            urllib.request.urlopen(warmup_req, timeout=15)
+            import subprocess as _wusp
+            _wu_kwargs: dict = {
+                "stdin": _wusp.DEVNULL,
+                "stdout": _wusp.DEVNULL,
+                "stderr": _wusp.DEVNULL,
+            }
+            if sys.platform == "win32":
+                _wu_kwargs["creationflags"] = _wusp.CREATE_NO_WINDOW
+            else:
+                _wu_kwargs["start_new_session"] = True
+            _wusp.Popen(
+                [sys.executable, "-c",
+                 f"import urllib.request; urllib.request.urlopen({repr(warmup_url)}, timeout=15)"],
+                **_wu_kwargs,
+            )
         except Exception as e:
             _atom_debug_error("注入:vector_warmup", e)
+
+    sys.exit(0)
 
 
 def handle_user_prompt_submit(
@@ -388,11 +412,24 @@ def handle_user_prompt_submit(
 
     # ── Cross-project atom discovery (v2.5) + alias matching (v2.9) ──
     # Scan ALL project memory dirs for trigger matches, not just CWD project.
+    _MAX_CROSS_PROJECT_SCAN = 20
+
     loaded_proj_names = set()
     if proj_dir_str:
         loaded_proj_names.add(Path(proj_dir_str).parent.name)
-    # V2.20: use centralized discovery instead of direct path scan
-    for _cross_slug, cross_mem in discover_all_project_memory_dirs():
+    # V2.20 W13: limit cross-project scan; sort by recency to keep most active first
+    _all_cross = [
+        (s, m) for s, m in discover_all_project_memory_dirs()
+        if s not in loaded_proj_names
+    ]
+    if len(_all_cross) > _MAX_CROSS_PROJECT_SCAN:
+        def _mem_mtime(item: Tuple[str, Path]) -> float:
+            try:
+                return item[1].stat().st_mtime
+            except OSError:
+                return 0.0
+        _all_cross = sorted(_all_cross, key=_mem_mtime, reverse=True)[:_MAX_CROSS_PROJECT_SCAN]
+    for _cross_slug, cross_mem in _all_cross:
         if _cross_slug in loaded_proj_names:
             continue
         # v2.9: Check project aliases before trigger matching
@@ -936,6 +973,17 @@ def handle_stop(input_data: Dict[str, Any], config: Dict[str, Any]) -> None:
     output_block(reason)
 
 
+def _cleanup_old_states() -> None:
+    """W10: Remove state files older than 7 days (regardless of phase)."""
+    cutoff = time.time() - 7 * 86400
+    for f in WORKFLOW_DIR.glob("state-*.json"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> None:
     session_id = input_data.get("session_id", "")
     state = _ensure_state(session_id, input_data, config)
@@ -945,6 +993,12 @@ def handle_session_end(input_data: Dict[str, Any], config: Dict[str, Any]) -> No
 
     state["ended_at"] = _now_iso()
     state["phase"] = "done"
+
+    # W10: Clean up stale state files (older than 7 days)
+    try:
+        _cleanup_old_states()
+    except Exception as e:
+        print(f"[v2.20] State cleanup error: {e}", file=sys.stderr)
 
     # ─── Spawn extract-worker.py as detached subprocess (V2.12) ─────────
     rc = config.get("response_capture", {})
