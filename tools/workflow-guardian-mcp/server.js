@@ -723,6 +723,47 @@ function apiKnowledgeQueue(req, res) {
 
 // --- Atoms Browser API ---
 
+function apiProjects(req, res) {
+  const reg = loadRegistry();
+  const projects = [];
+  for (const [slug, info] of Object.entries(reg.projects || {})) {
+    const proj = {
+      slug,
+      root: info.root || "",
+      last_seen: info.last_seen || "",
+      aliases: info.aliases || [],
+      has_memory: false,
+      atom_count: 0,
+      failure_count: 0,
+      episodic_count: 0,
+    };
+    const memDir = path.join(info.root || "", ".claude", "memory");
+    if (fs.existsSync(memDir) && fs.existsSync(path.join(memDir, "MEMORY.md"))) {
+      proj.has_memory = true;
+      try {
+        proj.atom_count = fs.readdirSync(memDir).filter(f =>
+          f.endsWith(".md") && f !== "MEMORY.md" && !f.startsWith("_") && !f.startsWith("SPEC_")
+        ).length;
+      } catch {}
+      try {
+        const failDir = path.join(memDir, "failures");
+        if (fs.existsSync(failDir)) {
+          proj.failure_count = fs.readdirSync(failDir).filter(f => f.endsWith(".md") && f !== "_INDEX.md").length;
+        }
+      } catch {}
+      try {
+        const epicDir = path.join(memDir, "episodic");
+        if (fs.existsSync(epicDir)) {
+          proj.episodic_count = fs.readdirSync(epicDir).filter(f => f.endsWith(".md")).length;
+        }
+      } catch {}
+    }
+    projects.push(proj);
+  }
+  projects.sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+  jsonRes(res, 200, projects);
+}
+
 function apiAtoms(req, res) {
   const atoms = [];
   const scanDirs = [
@@ -967,6 +1008,16 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .atom-filter { padding: 6px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; font-size: 0.9em; margin-bottom: 12px; width: 300px; font-family: inherit; }
   .atom-filter::placeholder { color: #484f58; }
   .atom-stats { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .proj-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+  .proj-table th { text-align: left; color: #8b949e; padding: 8px; border-bottom: 2px solid #30363d; }
+  .proj-table td { padding: 8px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  .proj-table tr:hover { background: #161b2288; }
+  .proj-root { font-family: monospace; font-size: 0.85em; color: #79c0ff; word-break: break-all; }
+  .proj-badge-mem { background: #23863622; color: #3fb950; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; }
+  .proj-badge-nomem { background: #30363d; color: #8b949e; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; }
+  .proj-alias { font-size: 0.8em; color: #8b949e; }
+  .proj-filter-btn { background: none; border: 1px solid #30363d; color: #58a6ff; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em; font-family: inherit; }
+  .proj-filter-btn:hover { background: #58a6ff22; }
 </style>
 </head>
 <body>
@@ -982,6 +1033,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <button class="tab-btn" data-tab="episodic">情境記憶</button>
   <button class="tab-btn" data-tab="health">健康檢查</button>
   <button class="tab-btn" data-tab="atoms">原子記憶</button>
+  <button class="tab-btn" data-tab="projects">已知專案</button>
   <button class="tab-btn" data-tab="tests">測試</button>
   <button class="tab-btn" data-tab="vector">向量服務</button>
 </nav>
@@ -1000,6 +1052,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
 <div id="panelAtoms" class="tab-panel">
   <div id="atomsContent"><div class="empty">載入原子記憶中...</div></div>
+</div>
+
+<div id="panelProjects" class="tab-panel">
+  <div id="projectsContent"><div class="empty">載入已知專案中...</div></div>
 </div>
 
 <div id="panelTests" class="tab-panel">
@@ -1040,6 +1096,7 @@ function refreshCurrentTab() {
     case "episodic": renderEpisodic(); break;
     case "health": renderHealth(false); break;
     case "atoms": renderAtoms(); break;
+    case "projects": renderProjects(); break;
     case "tests": break; // manual trigger only
     case "vector": renderVector(); break;
   }
@@ -1436,6 +1493,64 @@ async function renderVector() {
   }
 }
 
+// ─── Projects Panel ───
+
+async function renderProjects() {
+  const el = document.getElementById("projectsContent");
+  try {
+    const projects = await (await fetch("/api/projects")).json();
+    if (!projects.length) {
+      el.innerHTML = '<div class="empty">project-registry.json 中無已知專案。</div>';
+      return;
+    }
+    let html = '<p style="color:#8b949e;font-size:0.85em;margin-bottom:12px">來源：project-registry.json（共 ' + projects.length + ' 個專案，動態更新）</p>';
+    html += '<table class="proj-table"><thead><tr>';
+    html += '<th>Slug / 別名</th><th>根路徑</th><th>記憶層</th><th>Atoms</th><th>Failures</th><th>Episodic</th><th>最後活動</th><th>操作</th>';
+    html += '</tr></thead><tbody>';
+    for (const p of projects) {
+      const memBadge = p.has_memory
+        ? '<span class="proj-badge-mem">✓ .claude/memory</span>'
+        : '<span class="proj-badge-nomem">未初始化</span>';
+      const aliases = (p.aliases || []).length
+        ? '<div class="proj-alias">' + p.aliases.map(a => esc(a)).join(', ') + '</div>'
+        : '';
+      const filterBtn = p.has_memory
+        ? '<button class="proj-filter-btn" onclick="filterAtomsByProject(' + JSON.stringify('project:' + p.slug) + ')">查看 Atoms</button>'
+        : '';
+      html += '<tr>';
+      html += '<td><strong>' + esc(p.slug) + '</strong>' + aliases + '</td>';
+      html += '<td><span class="proj-root">' + esc(p.root) + '</span></td>';
+      html += '<td>' + memBadge + '</td>';
+      html += '<td>' + (p.atom_count || 0) + '</td>';
+      html += '<td>' + (p.failure_count || 0) + '</td>';
+      html += '<td>' + (p.episodic_count || 0) + '</td>';
+      html += '<td>' + esc(p.last_seen || '-') + '</td>';
+      html += '<td>' + filterBtn + '</td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div class="empty">載入專案清單失敗：' + esc(e.message) + '</div>';
+  }
+}
+
+function filterAtomsByProject(layerPrefix) {
+  // Switch to atoms tab and filter by project layer
+  currentTab = "atoms";
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.querySelector('[data-tab="atoms"]').classList.add("active");
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.getElementById("panelAtoms").classList.add("active");
+  renderAtoms().then(() => {
+    const filterInput = document.getElementById("atomFilter");
+    if (filterInput) {
+      filterInput.value = layerPrefix;
+      filterInput.dispatchEvent(new Event("input"));
+    }
+  });
+}
+
 // ─── Atoms Browser ───
 
 let atomsData = [];
@@ -1668,6 +1783,9 @@ const httpServer = http.createServer((req, res) => {
   }
   if (pathname === "/api/atoms" && req.method === "GET") {
     return apiAtoms(req, res);
+  }
+  if (pathname === "/api/projects" && req.method === "GET") {
+    return apiProjects(req, res);
   }
 
   res.writeHead(404);

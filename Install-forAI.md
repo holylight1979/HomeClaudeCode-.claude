@@ -1,4 +1,4 @@
-# Atomic Memory V2.18 — 安裝指南
+# Atomic Memory V2.21 — 安裝指南
 
 > **目標讀者**：使用 VS Code + Claude Code Extension，但完全不知道原子記憶是什麼的開發者。
 > 本指南會幫你把原子記憶系統**合併安裝**到你現有的 `~/.claude/` 目錄中。
@@ -121,6 +121,7 @@ cp /tmp/atomic-memory/USER.md ~/.claude/USER.md
 # ── Hook 腳本 ──
 mkdir -p ~/.claude/hooks
 cp /tmp/atomic-memory/hooks/workflow-guardian.py ~/.claude/hooks/
+cp /tmp/atomic-memory/hooks/wg_paths.py ~/.claude/hooks/
 cp /tmp/atomic-memory/hooks/wg_core.py ~/.claude/hooks/
 cp /tmp/atomic-memory/hooks/wg_atoms.py ~/.claude/hooks/
 cp /tmp/atomic-memory/hooks/wg_intent.py ~/.claude/hooks/
@@ -284,7 +285,7 @@ cat > ~/.claude/memory/MEMORY.md << 'EOF'
 
 ## 高頻事實
 
-- 原子記憶 V2.18
+- 原子記憶 V2.21
 EOF
 ```
 
@@ -503,13 +504,15 @@ python ~/.claude/tools/memory-audit.py
 │
 ├── hooks/                        ★
 │   ├── workflow-guardian.py       ★ 統一 Hook 入口
+│   ├── wg_paths.py               ★ 路徑唯一真相來源 [V2.20]
 │   ├── wg_core.py                ★ 共用常數/設定/IO
 │   ├── wg_atoms.py               ★ 索引解析/trigger/ACT-R/section 注入
 │   ├── wg_intent.py              ★ 意圖分類/向量搜尋
 │   ├── wg_extraction.py          ★ 回應萃取
 │   ├── wg_episodic.py            ★ Episodic 管理
 │   ├── wg_iteration.py           ★ 自我迭代/衰減/覆轍
-│   └── wisdom_engine.py          ★ Wisdom Engine
+│   ├── wisdom_engine.py          ★ Wisdom Engine
+│   └── user-init.sh              ★ 多人 USER.md 初始化
 │
 ├── tools/                        ★
 │   ├── ollama_client.py          ★ Dual-Backend Ollama Client

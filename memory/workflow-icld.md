@@ -8,7 +8,7 @@
 - Created: 2026-03-19
 - Confirmations: 58
 - Tags: workflow, icld, sprint
-- Related: workflow-rules
+- Related: workflow-rules, icld-sprint-template
 
 ## 知識
 

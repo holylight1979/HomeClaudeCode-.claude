@@ -1,7 +1,6 @@
 # Atom Index — Global
 
 > Session 啟動時先讀此索引。比對 Trigger → Read 對應 atom。
-
 | Atom | Path | Trigger |
 |------|------|---------|
 | preferences | memory/preferences.md | 偏好, 風格, 習慣, 語言, 回應, 執P, 執驗上P, 上GIT |
