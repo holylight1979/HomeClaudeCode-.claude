@@ -5,6 +5,8 @@
 - Updated: 2026-03-13
 - Work-Unit: 智慧引擎 Wisdom Engine
 
+- Related: decisions-architecture
+
 ## 核心原則
 
 code 預運算判斷 → 只注入結論（≤90 tokens）

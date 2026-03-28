@@ -5,6 +5,8 @@
 
 ---
 
+- Related: workflow-icld
+
 ## A. Sprint 計畫模板（拆解時使用）
 
 用於產出功能拆解文件（如 `_AIDocs/plan/Feature_XXX.md`）。
