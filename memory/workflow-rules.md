@@ -4,9 +4,9 @@
 - Confidence: [固]
 - Type: procedural
 - Trigger: 工作流程, 大型任務, 分階段, SOP, 任務拆分, 上版, GIT, Phase
-- Last-used: 2026-03-26
+- Last-used: 2026-03-28
 - Created: 2026-03-06
-- Confirmations: 80
+- Confirmations: 84
 - Tags: workflow, vcs
 - Related: decisions, workflow-svn, workflow-icld
 

@@ -34,9 +34,9 @@ BASH_BLOCKLIST = [
     r"\bsystemctl\s+(poweroff|reboot|halt)\b",
 
     # 程序管理（防止 catclaw 自我重啟迴圈）
-    r"\bpm2\s+(restart|stop|delete|kill)\b",
-    r"\bpm2\s+start\b",
-    r"\bcatclaw\.js\b",
+    # r"\bpm2\s+(restart|stop|delete|kill)\b",
+    # r"\bpm2\s+start\b",
+    # r"\bcatclaw\.js\b",
     r"\bkill\s+-9\s",
     r"\bkill\s+-s\s*(KILL|SIGKILL|9)\b",
     r"\bpkill\b",

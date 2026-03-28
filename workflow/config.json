@@ -30,7 +30,7 @@
     "fallback_backend": "sentence-transformers",
     "fallback_model": "BAAI/bge-m3",
     "ollama_base_url": "http://127.0.0.1:11434",
-    "ollama_llm_model": "qwen3:1.7b",
+    "ollama_llm_model": "qwen3:14b",
     "ollama_backends": {
       "rdchat": {
         "base_url": "https://rdchat.uj.com.tw/ollama",
@@ -48,7 +48,7 @@
       },
       "local": {
         "base_url": "http://127.0.0.1:11434",
-        "llm_model": "qwen3:1.7b",
+        "llm_model": "qwen3:14b",
         "embedding_model": "qwen3-embedding",
         "priority": 2,
         "think": false,
