@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ONE-OFF: 一次性測試腳本，非常規工具
 """
 Atomic Memory v2.1 — Ranked Search Evaluation
 Compare keyword-only vs hybrid+ranked search on 50 queries.

@@ -22,7 +22,8 @@
       "mcp__playwright__browser_select_option",
       "mcp__playwright__browser_fill_form",
       "mcp__playwright__browser_network_requests",
-      "mcp__playwright__browser_evaluate"
+      "mcp__playwright__browser_evaluate",
+      "mcp__MCPControl__computer"
     ]
   },
   "hooks": {
@@ -37,6 +38,11 @@
           {
             "type": "command",
             "command": "python -c \"import runpy,pathlib;runpy.run_path(str(pathlib.Path.home()/'.claude/hooks/workflow-guardian.py'),run_name='__main__')\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python -c \"import runpy,pathlib;runpy.run_path(str(pathlib.Path.home()/'.claude/hooks/ensure-mcp.py'),run_name='__main__')\"",
             "timeout": 5
           }
         ]
@@ -119,5 +125,6 @@
       }
     ]
   },
-  "autoUpdatesChannel": "latest"
+  "autoUpdatesChannel": "latest",
+  "effortLevel": "high"
 }

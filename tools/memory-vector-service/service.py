@@ -23,10 +23,12 @@ from urllib.parse import parse_qs, urlparse
 # Add parent dir to path for imports
 SERVICE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVICE_DIR))
+# V2.20: import wg_paths for centralized path resolution
+sys.path.insert(0, str(Path.home() / ".claude" / "hooks"))
 
 from config import load_config, VECTORDB_DIR
 from indexer import build_index, create_embedder, get_index_status
-from searcher import search, search_raw, ranked_search, episodic_search
+from searcher import search, search_raw, ranked_search, ranked_search_sections, episodic_search
 
 # ─── Globals ─────────────────────────────────────────────────────────────────
 
@@ -98,6 +100,7 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         routes = {
             "/search": self._handle_search,
             "/search/ranked": self._handle_search_ranked,
+            "/search/ranked-sections": self._handle_search_ranked_sections,
             "/search/episodic": self._handle_search_episodic,
             "/health": self._handle_health,
             "/status": self._handle_status,
@@ -194,6 +197,31 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         )
         self._send_json(results)
 
+    def _handle_search_ranked_sections(self, params: Dict):
+        """GET /search/ranked-sections?q=...&intent=general&top_k=5&max_sections=3"""
+        q = params.get("q", [""])[0]
+        if not q:
+            self._send_error(400, "Missing query parameter 'q'")
+            return
+
+        intent = params.get("intent", ["general"])[0]
+        top_k = int(params.get("top_k", [str(_config.get("search_top_k", 5))])[0])
+        max_sections = int(params.get("max_sections", ["3"])[0])
+        min_score = float(params.get("min_score", ["0.50"])[0])
+        layer = params.get("layer", ["all"])[0]
+
+        results = ranked_search_sections(
+            query=q,
+            config=_config,
+            intent=intent,
+            top_k=top_k,
+            max_sections=max_sections,
+            min_score=min_score,
+            layer_filter=layer if layer != "all" else None,
+            embedder=_embedder,
+        )
+        self._send_json(results)
+
     def _handle_search_episodic(self, params: Dict):
         """GET /search/episodic?q=...&top_k=3&min_score=0.35
 
@@ -217,18 +245,19 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         )
 
         # Enrich each result with summary + triggers from the atom file
-        memory_dir = Path.home() / ".claude" / "memory"
+        # V2.20: use wg_paths for path resolution
+        from wg_paths import MEMORY_DIR as _mem_dir, discover_all_project_memory_dirs
+        _proj_dir_map = {s: d for s, d in discover_all_project_memory_dirs()}
         for r in results:
             file_path = r.get("file_path", "")
             layer = r.get("layer", "global")
             if not file_path:
                 continue
-            # Resolve absolute path: global → ~/.claude/memory/, project → projects/slug/memory/
             if layer.startswith("project:"):
                 slug = layer.split(":", 1)[1]
-                abs_path = Path.home() / ".claude" / "projects" / slug / "memory" / file_path
+                abs_path = _proj_dir_map.get(slug, _mem_dir) / file_path
             else:
-                abs_path = memory_dir / file_path
+                abs_path = _mem_dir / file_path
             if not abs_path.exists():
                 continue
             try:

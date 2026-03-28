@@ -3,15 +3,19 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 全域決策, workflow, guardian, hooks, MCP, 記憶系統決策, 記憶系統架構
-- Last-used: 2026-03-21
-- Confirmations: 66
+- Last-used: 2026-03-27
+- Confirmations: 100
 - Type: decision
 - Related: decisions-architecture
 
 ## 知識
 
 ### 核心架構
-- [固] 原子記憶 V2.17：Hybrid RECALL + Ranked Search + 回應捕獲（全量+逐輪） + 跨 Session 鞏固 + Write Gate + 自我迭代自動化 + Wisdom Engine + 檢索強化 + Context Budget + 衝突偵測 + Fix Escalation + Failures 自動化 + Token Diet + 覆轍偵測
+- [固] 原子記憶 V2.21 Phase 4：現有資料遷移。`migrate-v221.py`（tools/）：_AIAtoms/*.md + 個人 memory/*.md 合併 → {project_root}/.claude/memory/；舊 MEMORY.md 改指標型（Status: migrated-v2.21）；project-registry.json 自動更新；已遷移：SGI / 加班系統 / FastSVNViewer
+- [固] 原子記憶 V2.21 Phase 3：專案自治層建置。`init-project` skill Step 6 建立 `.claude/` 結構（memory/, hooks/, .gitignore, MEMORY.md 模板, project_hooks.py delegate 模板）；`_call_project_hook()` subprocess 隔離呼叫（5s timeout, 全例外吞噬）；`handle_session_start` 末尾呼叫 on_session_start delegate
+- [固] 原子記憶 V2.21 Phase 2：Project Registry + 路徑切換。`register_project()` SessionStart 自動呼叫；`get_project_memory_dir()` 新路徑優先（{project_root}/.claude/memory/）；`find_project_root()` 加 `.claude/memory/MEMORY.md` 辨識；_AIAtoms merge 邏輯移除
+- [固] 原子記憶 V2.20：路徑集中化（wg_paths.py）+ bug 修復（C5~C7, W8~W13）
+- [固] 原子記憶 V2.18：V2.17 全功能 + Section-Level 注入 + Trigger 精準化 + 規則精簡 + 反向參照自動修復
 - [固] 雙 LLM：Claude Code（雲端決策）+ Ollama（本地語意處理）
 - [固] 6 hook 事件全由 workflow-guardian.py 統一處理
 
@@ -39,8 +43,9 @@
 - [固] 衝突偵測：SessionEnd 對修改 atoms 做向量搜尋，寫入 episodic 警告
 - [固] 自我迭代精簡為 3 條：品質函數（Hook）、證據門檻（Claude）、震盪偵測（Hook）
 - [固] V2.16 自我迭代自動化：SessionEnd 衰減分數掃描 + [臨]→[觀] 自動晉升（Confirmations ≥ 20）+ 震盪狀態跨 Session 持久化
-- [觀] V2.17 覆轍偵測：episodic 寫入覆轍信號（same_file_3x / retry_escalation）→ SessionStart 掃描跨 session 重複 → 注入 [Guardian:覆轍] 警告
+- [固] V2.17 覆轍偵測：episodic 寫入覆轍信號（same_file_3x / retry_escalation）→ SessionStart 掃描跨 session 重複 → 注入 [Guardian:覆轍] 警告
 - [固] AIDocs 內容閘門：PostToolUse 偵測 _AIDocs/ 下暫時性檔名（Plan/TODO/Roadmap/Draft 等）→ additionalContext 警告（不硬擋）
+- [固] V2.18 反向參照自動修復：SessionEnd 呼叫 `atom-health-check.py --fix-refs`（全域+專案層），冪等去重，10s timeout
 
 ### Wisdom Engine
 - [固] 2 硬規則（file_count+is_feature → confirm; touches_arch+file_count → plan）
@@ -67,3 +72,4 @@
 - 2026-03-19: 精修拆分 — 技術細節移至 decisions-architecture，歷史移至 _reference
 - 2026-03-22: V2.16 自我迭代自動化決策記錄
 - 2026-03-22: V2.17 覆轍偵測 — 寄生式跨 session 重複失敗模式偵測
+- 2026-03-23: V2.17 合併升級至公司電腦
