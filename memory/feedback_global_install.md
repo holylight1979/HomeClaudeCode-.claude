@@ -26,7 +26,7 @@
    "{name}": {
      "type": "stdio",
      "command": "C:\\Program Files\\nodejs\\node.exe",
-     "args": ["C:\\Users\\holylight\\AppData\\Roaming\\npm\\node_modules\\{pkg}\\dist\\{entry}.js"],
+     "args": ["C:\\Users\\holyl\\AppData\\Roaming\\npm\\node_modules\\{pkg}\\dist\\{entry}.js"],
      "env": {}
    }
    ```

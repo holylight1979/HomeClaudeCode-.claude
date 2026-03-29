@@ -588,14 +588,20 @@ function apiEpisodic(req, res) {
     }
     const atoms = [];
     for (const dir of dirsToScan) {
-      try {
-        const files = fs.readdirSync(dir)
-          .filter(f => f.startsWith("episodic-") && f.endsWith(".md"));
-        for (const f of files) {
-          try { atoms.push(parseEpisodicAtom(path.join(dir, f))); }
-          catch {}
-        }
-      } catch {}
+      // Scan both top-level and episodic/ subdirectory
+      const scanPaths = [dir];
+      const epSub = path.join(dir, "episodic");
+      if (fs.existsSync(epSub)) scanPaths.push(epSub);
+      for (const scanDir of scanPaths) {
+        try {
+          const files = fs.readdirSync(scanDir)
+            .filter(f => f.startsWith("episodic-") && f.endsWith(".md"));
+          for (const f of files) {
+            try { atoms.push(parseEpisodicAtom(path.join(scanDir, f))); }
+            catch {}
+          }
+        } catch {}
+      }
     }
     atoms.sort((a, b) => (b.created || "").localeCompare(a.created || ""));
     jsonRes(res, 200, atoms);
@@ -1023,7 +1029,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <body>
 <div style="display:flex;justify-content:space-between;align-items:baseline;">
   <div><h1>工作流守衛 v2.1</h1><p class="subtitle">記憶與對話監控</p></div>
-  <div class="auto-refresh"><label><input type="checkbox" id="autoRefresh" checked> 自動重整 (5秒)</label></div>
+  <div class="auto-refresh"><label><input type="checkbox" id="autoRefresh" checked> 自動重整 (30秒)</label></div>
 </div>
 
 <div class="stats" id="statsBar"></div>
@@ -1662,7 +1668,7 @@ function filterAtoms(query) {
 function startAutoRefresh() {
   clearInterval(refreshTimer);
   if (document.getElementById("autoRefresh").checked) {
-    refreshTimer = setInterval(refreshCurrentTab, 5000);
+    refreshTimer = setInterval(refreshCurrentTab, 30000);
   }
 }
 

@@ -56,7 +56,7 @@
 - [固] **一律全域安裝 + 絕對路徑**：`npm i -g {pkg}` → 用 `node.exe` + 絕對路徑指向 `AppData/Roaming/npm/node_modules/{pkg}/dist/{entry}.js`
 - [固] **禁用 npx 啟動**：`cmd /c npx` 在 VSCode 擴充環境不穩定，MCP server 會無法啟動
 - [固] 入口查找：`package.json` 的 `bin` 欄位確認 entry point
-- [固] 範本：`"command": "C:\\Program Files\\nodejs\\node.exe", "args": ["C:\\Users\\holylight\\AppData\\Roaming\\npm\\node_modules\\{pkg}\\dist\\{entry}.js"]`
+- [固] 範本：`"command": "C:\\Program Files\\nodejs\\node.exe", "args": ["C:\\Users\\holyl\\AppData\\Roaming\\npm\\node_modules\\{pkg}\\dist\\{entry}.js"]`
 
 ### 環境特殊配置
 

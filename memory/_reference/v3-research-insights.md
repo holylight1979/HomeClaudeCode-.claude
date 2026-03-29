@@ -10,11 +10,15 @@
 - Tags: research, theory, v3-design
 - Related: decisions, v3-design-spec
 
-## 起源
+## 知識
+
+- [觀] 三領域跨學科研究洞見（ACT-R 激活、擴散激活、唯識學薰習原則），用於 V2.9 記憶檢索強化設計
+
+### 起源
 
 使用者描述了自己聽到 "sgi" 時的認知流程（6 步），要求從數學/佛學/AI 三領域搜尋可用於改善記憶檢索的理論框架。
 
-## 認知科學 — 可直接實作
+### 認知科學 — 可直接實作
 
 ### ACT-R 基礎激活（Anderson）
 ```
@@ -37,7 +41,7 @@ Salience = w_r×Recency + w_f×Frequency + w_e×EmotionalWeight + w_u×Urgency
 ```
 - 留作未來參考，V3 先用 ACT-R B_i 即可涵蓋 recency + frequency
 
-## 佛學（唯識學）— 設計啟發
+### 佛學（唯識學）— 設計啟發
 
 ### 三個落地的洞見
 
@@ -67,7 +71,7 @@ Salience = w_r×Recency + w_f×Frequency + w_e×EmotionalWeight + w_u×Urgency
 - 用佛學思考，用工程語言寫碼和文件
 - 唯識學描述「心」，不是軟體；比喻有延伸限度
 
-## AI/CS — 實作工具箱
+### AI/CS — 實作工具箱
 
 ### 最值得參考的模式（按 effort/value 排序）
 
@@ -84,7 +88,7 @@ Score = α×cos_sim + β×BM25 + γ×graph_proximity
 - 三軸融合比任何單一方法都好
 - 現有系統：keyword + vector 雙軸，V3 加 graph proximity（Related edges）= 三軸
 
-## 未來方向
+### 未來方向
 
 ### 閱讀 Session 模式（V2.11+ 候選）
 
@@ -100,9 +104,14 @@ Score = α×cos_sim + β×BM25 + γ×graph_proximity
 - 閱讀完成時自動產出結構化索引（類似 `_AIDocs/_INDEX.md` 但覆蓋更廣）
 - 可指定目標 atom：「這次閱讀的知識存到 doc-inventory atom」
 
-## 演化日誌
+### 演化日誌
 
 | 日期 | 變更 | 來源 |
 |------|------|------|
 | 2026-03-11 | 建立，三領域研究完成 | session:V3 設計討論 |
 | 2026-03-11 | +閱讀 Session 模式構想 | session:V2.10 討論 |
+
+## 行動
+
+- 設計記憶檢索機制時參考認知科學與佛學洞見
+- ACT-R 和 Spreading Activation 已落地於 V2.9；其餘為未來參考

@@ -8,9 +8,13 @@
 - Created: 2026-03-11
 - Confirmations: 0
 - Tags: v2.9, design, retrieval, architecture
-- Related: decisions, spec, v3-research, v3-research-insights
+- Related: decisions, v3-research-insights
 
-## 背景
+## 知識
+
+- [固] V2.9 記憶檢索強化設計規格，涵蓋 Project-Aliases、Related-Edge Spreading、ACT-R Activation、Blind-Spot Reporter 四項改動（全部已實作完成）
+
+### 背景
 
 V2.8 的記憶檢索有 3 個已證實的缺陷：
 1. **跨專案身份盲區**：prompt 含 "sgi" 但 c--Projects 的 atoms 無此 trigger → 找不到
@@ -20,16 +24,16 @@ V2.8 的記憶檢索有 3 個已證實的缺陷：
 另有 1 個系統級問題：
 4. **靜默失敗**：prompt 找不到任何 atom 時系統不報告，使用者和 LLM 都不知道有盲點
 
-## 設計原則
+### 設計原則
 
 來自跨領域研究的三個核心洞見（佛學啟發設計，工程語言實作）：
 - **每次讀取即寫入**（薰習原則）：atom 被觸發時自動更新 activation metadata
 - **過濾先於辨識**（受先於想）：先判斷領域相關性，再注入內容
 - **承認偏差存在**（末那識警示）：系統應報告盲點，不假裝全知
 
-## 改動項目
+### 改動項目
 
-### 1. Project-Aliases（跨專案身份辨識）
+#### 1. Project-Aliases（跨專案身份辨識）
 
 **問題**：c--Projects/memory/MEMORY.md 的所有 atom triggers 是 port, path, 路徑... 無一含 "sgi"。
 跨專案掃描用 `keyword in prompt` 比對 trigger → 全部 miss。
@@ -48,7 +52,7 @@ V2.8 的記憶檢索有 3 個已證實的缺陷：
 
 **改動量**：~20 行
 
-### 2. Related-Edge Spreading（多跳檢索）
+#### 2. Related-Edge Spreading（多跳檢索）
 
 **問題**：atom 有 `Related: server_services, client_main` 但 hook 不使用。
 命中 architecture 後不會自動帶出相關 atoms。
@@ -78,7 +82,7 @@ def spread_related(matched_atoms, all_atoms_index, max_depth=1):
 
 **改動量**：~40 行
 
-### 3. ACT-R Activation Scoring（時間加權）
+#### 3. ACT-R Activation Scoring（時間加權）
 
 **問題**：Confirmations 是平面計數 (+1)，不反映時間衰減。
 一個 3 月前觸發 10 次的 atom 和昨天觸發 10 次的 atom 分數相同。
@@ -100,7 +104,7 @@ B_i = ln( Σ_{k=1}^{n} t_k^{-0.5} )
 
 **改動量**：~50 行 + 每個 atom 一個 .access.json 檔
 
-### 4. Blind-Spot Reporter（盲點報告）
+#### 4. Blind-Spot Reporter（盲點報告）
 
 **問題**：prompt 找不到任何 atom 時系統靜默，LLM 不知道自己沒有相關記憶。
 
@@ -113,16 +117,16 @@ B_i = ln( Σ_{k=1}^{n} t_k^{-0.5} )
 
 **改動量**：~10 行
 
-## 附帶清理
+### 附帶清理
 
-### 刪除 c--Projects-sgi-server/memory/
+#### 刪除 c--Projects-sgi-server/memory/
 
 分析結果：c--Projects 已是 c--Projects-sgi-server 的完全超集。
 sgi-server 的 decisions atom 自己寫「詳細版見 c--Projects 層的同名 atom」。
 
 **動作**：刪除 `c--Projects-sgi-server/memory/` 目錄（保留 session logs）。
 
-## 驗證計畫
+### 驗證計畫
 
 1. **Project-Aliases**：從非 sgi CWD 問 "sgi 的架構"，確認 c--Projects atoms 被注入
 2. **Related spreading**：觸發 architecture，確認 server_services 也被帶出
@@ -130,7 +134,7 @@ sgi-server 的 decisions atom 自己寫「詳細版見 c--Projects 層的同名 
 4. **Blind-spot**：問一個完全無 atom 的主題，確認報告出現
 5. **回歸測試**：正常使用流程不受影響（trigger match、vector search、token budget）
 
-## 排除項（有意不做）
+### 排除項（有意不做）
 
 以下項目經評估為過度工程或雞肋，不納入 V2.9（留待 V3 考慮）：
 - 四緣閘門（增加 4 個檢查點，邊際改善不值得複雜度）
@@ -139,12 +143,17 @@ sgi-server 的 decisions atom 自己寫「詳細版見 c--Projects 層的同名 
 - 佛學術語入碼（增加認知負擔，用工程語言即可）
 - 末那識命名層（實質只是 project scope，現有機制已足）
 
-## 實施計畫
+### 實施計畫
 
 - **Session 1**：Project-Aliases + 刪除 sgi-server 冗餘 + Blind-Spot Reporter
 - **Session 2**：Related-Edge Spreading + ACT-R Activation Scoring
 - **Session 3**：整合測試 + SPEC/文件更新 + 版本號升級
 
-## 理論參考
+### 理論參考
 
 跨領域研究摘要存於 `memory/v3-research-insights.md`
+
+## 行動
+
+- 記憶檢索機制開發時參考此設計規格
+- 全部功能已於 V2.9 實作完成，作為歷史參考

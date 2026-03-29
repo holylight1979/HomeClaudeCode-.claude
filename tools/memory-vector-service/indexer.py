@@ -356,16 +356,34 @@ class SentenceTransformerEmbedder:
 
 
 def create_embedder(config: Dict[str, Any]) -> Any:
-    """Create embedder based on config, with fallback."""
+    """Create embedder based on config, with fallback.
+
+    When fallback_backend is "none", skip sentence-transformers entirely.
+    This prevents accidentally loading a multi-GB model.
+    """
     backend = config.get("embedding_backend", "ollama")
     if backend == "ollama":
         emb = OllamaEmbedder()
         if emb.is_available():
             return emb
         # Fallback
-        print("[indexer] Ollama unavailable, falling back to sentence-transformers", file=sys.stderr)
+        print("[indexer] Ollama unavailable, checking fallback...", file=sys.stderr)
+
+    # Respect fallback_backend: "none" — do NOT try sentence-transformers
+    fb_backend = config.get("fallback_backend", "sentence-transformers")
+    if fb_backend in ("none", "None", "", None):
+        raise RuntimeError(
+            "No embedding backend available. Ollama is unreachable and "
+            "fallback_backend is set to 'none'."
+        )
 
     fb_model = config.get("fallback_model", "BAAI/bge-m3")
+    if fb_model in ("none", "None", "", None):
+        raise RuntimeError(
+            "No embedding backend available. Ollama is unreachable and "
+            "fallback_model is set to 'none'."
+        )
+
     emb = SentenceTransformerEmbedder(model_name=fb_model)
     if emb.is_available():
         return emb
@@ -513,6 +531,9 @@ def build_index(
                 changed_atoms = {f"{r['layer']}:{r['atom_name']}" for r in records}
                 for ak in changed_atoms:
                     layer_val, atom_val = ak.split(":", 1)
+                    # Escape single quotes to prevent query breakage
+                    layer_val = layer_val.replace("'", "''")
+                    atom_val = atom_val.replace("'", "''")
                     table.delete(f"layer = '{layer_val}' AND atom_name = '{atom_val}'")
                 table.add(records)
             except Exception:
@@ -579,10 +600,12 @@ def search_vectors(
         table = db.open_table(TABLE_NAME)
         q = table.search(query_vec).limit(top_k).metric("cosine")
         if layer_filter and layer_filter not in ("all", None):
+            # Sanitize: escape single quotes to prevent query breakage
+            safe_filter = layer_filter.replace("'", "''")
             if layer_filter == "global":
-                q = q.where(f"layer = 'global'")
+                q = q.where("layer = 'global'")
             elif layer_filter.startswith("project:"):
-                q = q.where(f"layer = '{layer_filter}'")
+                q = q.where(f"layer = '{safe_filter}'")
         results = q.to_list()
         return results
     except Exception:

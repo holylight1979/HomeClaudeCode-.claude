@@ -117,7 +117,14 @@ class OllamaClient:
         )
         if result is None:
             return ""
-        return result.get("message", {}).get("content", "")
+        if not isinstance(result, dict):
+            return str(result) if result else ""
+        msg = result.get("message", {})
+        if isinstance(msg, str):
+            return msg
+        if isinstance(msg, dict):
+            return msg.get("content", "")
+        return ""
 
     def chat(self, messages: List[Dict[str, str]], system: str = "",
              model: str = None, timeout: int = 30) -> str:
@@ -141,7 +148,14 @@ class OllamaClient:
         )
         if result is None:
             return ""
-        return result.get("message", {}).get("content", "")
+        if not isinstance(result, dict):
+            return str(result) if result else ""
+        msg = result.get("message", {})
+        if isinstance(msg, str):
+            return msg
+        if isinstance(msg, dict):
+            return msg.get("content", "")
+        return ""
 
     def embed(self, texts: List[str], model: str = None,
               timeout: int = 120) -> List[List[float]]:
@@ -736,6 +750,13 @@ def _build_backends_from_config(config: dict) -> List[OllamaBackend]:
         # New format
         backends = []
         for name, cfg in backends_cfg.items():
+            enabled = cfg.get("enabled", True)
+            # Clear stale reauth marker for disabled backends (prevents setup_needed spam)
+            if not enabled and name == "rdchat" and REAUTH_MARKER.exists():
+                try:
+                    REAUTH_MARKER.unlink(missing_ok=True)
+                except OSError:
+                    pass
             backends.append(OllamaBackend(
                 name=name,
                 base_url=cfg.get("base_url", "http://127.0.0.1:11434"),
@@ -743,7 +764,7 @@ def _build_backends_from_config(config: dict) -> List[OllamaBackend]:
                 llm_model=cfg.get("llm_model"),
                 embedding_model=cfg.get("embedding_model"),
                 priority=cfg.get("priority", 99),
-                enabled=cfg.get("enabled", True),
+                enabled=enabled,
                 think=cfg.get("think", False),
                 llm_num_predict=cfg.get("llm_num_predict", 2048),
             ))
@@ -788,11 +809,20 @@ def reset_client():
 def check_rdchat_status() -> Optional[Dict[str, str]]:
     """Check if rdchat needs setup or reauth.
 
-    Returns None if everything is fine, or a dict with:
+    Returns None if everything is fine (or rdchat is disabled), or a dict with:
       {"type": "setup_needed"|"reauth_needed", "user": ..., "message": ...}
 
     Hooks / session-start can call this and display the message to the user.
     """
+    # Don't report rdchat issues when rdchat is disabled
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            rdchat_cfg = cfg.get("vector_search", {}).get("ollama_backends", {}).get("rdchat", {})
+            if not rdchat_cfg.get("enabled", True):
+                return None
+        except (json.JSONDecodeError, OSError):
+            pass
     if REAUTH_MARKER.exists():
         try:
             return json.loads(REAUTH_MARKER.read_text(encoding="utf-8"))

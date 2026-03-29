@@ -1,10 +1,10 @@
 # Wisdom Engine 設計文件（V2.11）
 
-- Status: ✅ V2.11 重構完成
-- Created: 2026-03-10
-- Updated: 2026-03-13
-- Work-Unit: 智慧引擎 Wisdom Engine
-
+- Scope: global
+- Confidence: [固]
+- Trigger: wisdom engine, 智慧引擎, DESIGN, 情境分類, 反思引擎, reflection, Bayesian
+- Last-used: 2026-03-13
+- Confirmations: 0
 - Related: decisions-architecture
 
 ## 核心原則

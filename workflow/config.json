@@ -1,5 +1,5 @@
 {
-  "atom_debug": true,
+  "atom_debug": false,
   "enabled": true,
   "stop_gate_max_blocks": 2,
   "min_files_to_block": 2,
@@ -27,8 +27,8 @@
     "service_port": 3849,
     "embedding_backend": "ollama",
     "embedding_model": "qwen3-embedding:0.6b",
-    "fallback_backend": "sentence-transformers",
-    "fallback_model": "BAAI/bge-m3",
+    "fallback_backend": "none",
+    "fallback_model": "none",
     "ollama_base_url": "http://127.0.0.1:11434",
     "ollama_llm_model": "qwen3:1.7b",
     "ollama_backends": {
@@ -49,7 +49,7 @@
       "local": {
         "base_url": "http://127.0.0.1:11434",
         "llm_model": "qwen3:1.7b",
-        "embedding_model": "qwen3-embedding",
+        "embedding_model": "qwen3-embedding:0.6b",
         "priority": 2,
         "think": false,
         "llm_num_predict": 2048
@@ -96,7 +96,7 @@
     "session_end_timeout_seconds": 10,
     "classification_default": "[臨]",
     "per_turn": {
-      "enabled": true,
+      "enabled": false,
       "min_new_chars": 500,
       "max_items": 3,
       "skip_cross_session": true,

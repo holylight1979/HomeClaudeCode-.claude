@@ -17,9 +17,9 @@ DEFAULTS: Dict[str, Any] = {
     "enabled": True,
     "service_port": 3849,
     "embedding_backend": "ollama",          # "ollama" | "sentence-transformers"
-    "embedding_model": "qwen3-embedding",   # Ollama model name
-    "fallback_backend": "sentence-transformers",
-    "fallback_model": "BAAI/bge-m3",
+    "embedding_model": "qwen3-embedding:0.6b",  # Ollama model name
+    "fallback_backend": "none",
+    "fallback_model": "none",
     "ollama_base_url": "http://127.0.0.1:11434",
     "ollama_llm_model": "qwen3:4b",
     "search_top_k": 5,

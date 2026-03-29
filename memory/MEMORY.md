@@ -12,7 +12,7 @@
 | workflow-svn | memory/workflow-svn.md | svn, svn-update, TortoiseSVN, 衝突, conflict |
 | fail-env | memory/failures/env-traps.md | Win環境陷阱, Windows, MSYS2, Node.js, npx, Ollama, port, MCP啟動, VSCode |
 | fail-assumptions | memory/failures/wrong-assumptions.md | 假設錯誤, 直覺偏差, 為何沒生效, 空目錄, metrics異常, 功能沒反應 |
-| fail-silent | memory/failures/silent-failures.md | 靜默, silent, 看似正常, setdefault, knowledge_queue為空, 吞掉錯誤 |
+| fail-silent | memory/failures/silent-failures.md | 靜默, silent, 看似正常, setdefault, knowledge_queue為空, 沒報錯但沒動作, 吞掉錯誤 |
 | fail-cognitive | memory/failures/cognitive-patterns.md | 過度工程, 代理指標, proxy metric, AI看不懂, AI在打轉, 品質回饋 |
 | toolchain | memory/toolchain.md | 工具鏈, 環境設定, bash指令, command, bash, git, python, npm |
 | toolchain-ollama | memory/toolchain-ollama.md | ollama, dual-backend, rdchat, qwen3, embedding, 萃取品質, thinking, Open WebUI |
@@ -23,3 +23,7 @@
 | fail-misdiagnosis | memory/failures/misdiagnosis-verify-first.md | 誤診, 驗證優先, verify first, 診斷失敗, 先射箭再畫靶, 假設錯誤就規劃, 過度規劃, 沒驗證就動手 |
 | feedback-no-test-to-svn | memory/feedback_no_test_to_svn.md | 上SVN, svn commit, 測試碼, 新手作業, 練習, 不可上傳 |
 | feedback-global-install | memory/feedback_global_install.md | 安裝MCP, 安裝skill, install MCP, install skill, add MCP, 新增MCP, 新增skill |
+| hardware | memory/hardware.md | 硬體, 電腦, 升級, hardware, PC, GPU, CPU, 顯卡, 記憶體, RAM, 主機板 |
+| self-iteration | memory/_reference/self-iteration.md | 自我迭代, self-iteration, 演進原則, 規則管理 |
+| v3-design-spec | memory/_reference/v3-design-spec.md | V2.9, V3, 檢索強化, project-alias, ACT-R, blind-spot |
+| v3-research-insights | memory/_reference/v3-research-insights.md | V3, 研究, 認知科學, 佛學, ACT-R, spreading activation |

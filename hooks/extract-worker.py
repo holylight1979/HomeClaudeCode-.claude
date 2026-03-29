@@ -253,7 +253,9 @@ def _parse_llm_response(raw: str) -> List[dict]:
     try:
         match = re.search(r"\[.*\]", raw, re.DOTALL)
         if match:
-            items = json.loads(match.group(0))
+            parsed = json.loads(match.group(0))
+            # Filter: only keep dict items (LLM may emit strings/ints in array)
+            items = [x for x in parsed if isinstance(x, dict)]
     except (json.JSONDecodeError, ValueError):
         for m in re.finditer(r'"content"\s*:\s*"([^"]{10,150})"', raw):
             items.append({"content": m.group(1), "type": "factual"})

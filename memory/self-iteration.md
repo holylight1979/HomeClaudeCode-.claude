@@ -6,7 +6,7 @@
 - Last-used: 2026-03-15
 - Confirmations: 3
 - Type: knowledge
-- Related: decisions.md, SPEC_Atomic_Memory_System.md
+- Related: decisions
 
 ## 知識
 

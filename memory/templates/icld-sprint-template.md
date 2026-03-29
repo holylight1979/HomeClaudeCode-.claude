@@ -5,6 +5,11 @@
 
 ---
 
+- Scope: global
+- Confidence: [固]
+- Trigger: ICLD template, Sprint 模板, sprint template, 閉環模板
+- Last-used: 2026-03-25
+- Confirmations: 0
 - Related: workflow-icld
 
 ## A. Sprint 計畫模板（拆解時使用）
