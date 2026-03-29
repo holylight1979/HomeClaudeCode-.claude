@@ -1,7 +1,7 @@
 # MyClaudeCode (.claude) — AI 分析文件索引
 
 > 本資料夾記錄 `~/.claude` 自訂擴充系統的架構與演進。
-> 最近更新：2026-03-22
+> 最近更新：2026-03-29
 
 ---
 
@@ -20,4 +20,4 @@
 
 ## 架構一句話摘要
 
-基於 Claude Code hooks 事件驅動的工作流監督系統，搭配雙 LLM（Claude + Ollama qwen3/qwen3.5）原子記憶管理跨 session 知識。V2.17：Dual-Backend、Wisdom Engine、衝突偵測、rules/ 模組化、Fix Escalation、Failures 自動化、Token Diet、自我迭代自動化、覆轍偵測。
+基於 Claude Code hooks 事件驅動的工作流監督系統，搭配雙 LLM（Claude + Ollama qwen3）原子記憶管理跨 session 知識。V2.22：Hook 模組化（wg_*.py 拆分）、注入閘門（plan 內容過濾）、全面健檢 23 bug 修正、per_turn 重啟、dead code 清理。
