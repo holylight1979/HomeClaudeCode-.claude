@@ -27,3 +27,4 @@
 | self-iteration | memory/_reference/self-iteration.md | 自我迭代, self-iteration, 演進原則, 規則管理 |
 | v3-design-spec | memory/_reference/v3-design-spec.md | V2.9, V3, 檢索強化, project-alias, ACT-R, blind-spot |
 | v3-research-insights | memory/_reference/v3-research-insights.md | V3, 研究, 認知科學, 佛學, ACT-R, spreading activation |
+| feedback-identity-decision | memory/feedback_identity_decision.md | 確認, 要刪嗎, 要改嗎, 使用者確認, 問使用者 |

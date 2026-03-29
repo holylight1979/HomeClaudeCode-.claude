@@ -17,6 +17,13 @@ Usage:
 Requirements: Python 3.8+, no external dependencies.
 """
 
+import sys, io
+# Force UTF-8 stdout on Windows (cp950 codepage causes mojibake in JSON output)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import argparse
 import json
 import os

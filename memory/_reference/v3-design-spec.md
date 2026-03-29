@@ -2,12 +2,9 @@
 
 - Scope: global
 - Confidence: [固]
-- Type: design
 - Trigger: V2.9, V3, 設計, 檢索強化, project-alias, ACT-R, multi-hop, blind-spot
 - Last-used: 2026-03-11
-- Created: 2026-03-11
 - Confirmations: 0
-- Tags: v2.9, design, retrieval, architecture
 - Related: decisions, v3-research-insights
 
 ## 知識

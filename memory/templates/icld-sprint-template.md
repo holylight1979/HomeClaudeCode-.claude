@@ -12,7 +12,9 @@
 - Confirmations: 0
 - Related: workflow-icld
 
-## A. Sprint 計畫模板（拆解時使用）
+## 知識
+
+### A. Sprint 計畫模板（拆解時使用）
 
 用於產出功能拆解文件（如 `_AIDocs/plan/Feature_XXX.md`）。
 
@@ -38,7 +40,7 @@ S4 → S5 → S6    ({線名})
 
 ---
 
-## B. Sprint Prompt 模板（每個 Sprint 開始時給 AI）
+### B. Sprint Prompt 模板（每個 Sprint 開始時給 AI）
 
 ```markdown
 # Sprint S{N}：{Sprint 名稱}

@@ -529,6 +529,8 @@ function jsonRes(res, code, data) {
 function pyCmd(scriptPath, args) {
   return 'python "' + scriptPath.replace(/\\/g, "/") + '" ' + args;
 }
+// Force Python subprocess to use UTF-8 (Windows cp950 codepage causes mojibake)
+const PY_EXEC_OPTS = { env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } };
 
 // --- Episodic Atom Parser & API ---
 
@@ -636,12 +638,12 @@ function apiHealth(req, res, forceRefresh) {
     healthCache = { data: merged, timestamp: Date.now() };
     jsonRes(res, 200, merged);
   };
-  exec(pyCmd(auditScript, "--json"), { timeout: 30000 }, (err, stdout) => {
+  exec(pyCmd(auditScript, "--json"), { timeout: 30000, ...PY_EXEC_OPTS }, (err, stdout) => {
     if (stdout) { try { auditData = JSON.parse(stdout); } catch {} }
     auditDone = true;
     tryMerge();
   });
-  exec(pyCmd(healthScript, "--report --json"), { timeout: 30000 }, (err, stdout) => {
+  exec(pyCmd(healthScript, "--report --json"), { timeout: 30000, ...PY_EXEC_OPTS }, (err, stdout) => {
     if (stdout) { try { healthData = JSON.parse(stdout); } catch {} }
     healthDone = true;
     tryMerge();
@@ -662,7 +664,7 @@ function apiTestRunStart(req, res) {
   testJobs.set(jobId, job);
 
   const scriptPath = path.join(TOOLS_DIR, "test-memory-v21.py");
-  exec(pyCmd(scriptPath, "--json"), { timeout: 120000 }, (err, stdout, stderr) => {
+  exec(pyCmd(scriptPath, "--json"), { timeout: 120000, ...PY_EXEC_OPTS }, (err, stdout, stderr) => {
     if (!testJobs.has(jobId)) return;
     // Script exits non-zero when tests fail — still parse stdout
     if (stdout) {

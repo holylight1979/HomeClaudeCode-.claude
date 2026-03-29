@@ -2,13 +2,10 @@
 
 - Scope: global
 - Confidence: [固]
-- Type: semantic
 - Trigger: 記憶系統架構, 檔案結構, hook, skill, tool, 記憶升級, 記憶迭代, 目錄結構
 - Last-used: 2026-03-27
 - Updated: 2026-03-23
-- Created: 2026-03-13
 - Confirmations: 58
-- Tags: doc-index, system-overview
 - Related: decisions, decisions-architecture, toolchain
 
 ## 知識
