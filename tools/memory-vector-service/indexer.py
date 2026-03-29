@@ -482,12 +482,24 @@ def build_index(
         texts = [r["text"] for r in records]
         if verbose:
             print(f"[indexer] Embedding {len(texts)} chunks...")
-        batch_size = 32
+        batch_size = 16
         all_vecs: List[List[float]] = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            vecs = embedder.embed(batch)
-            all_vecs.extend(vecs)
+            for attempt in range(3):
+                try:
+                    vecs = embedder.embed(batch)
+                    all_vecs.extend(vecs)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        if verbose:
+                            print(f"[indexer] Batch {i//batch_size} retry {attempt+1}: {e}")
+                        time.sleep(2)
+                    else:
+                        raise RuntimeError(f"Embedding batch {i//batch_size} failed after 3 retries: {e}")
+            if verbose and (i // batch_size) % 20 == 0:
+                print(f"[indexer] Progress: {min(i + batch_size, len(texts))}/{len(texts)}")
 
         for i, rec in enumerate(records):
             rec["vector"] = all_vecs[i]

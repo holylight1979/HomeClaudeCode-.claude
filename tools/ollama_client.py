@@ -144,7 +144,7 @@ class OllamaClient:
         return result.get("message", {}).get("content", "")
 
     def embed(self, texts: List[str], model: str = None,
-              timeout: int = 60) -> List[List[float]]:
+              timeout: int = 120) -> List[List[float]]:
         """POST embedding request.
 
         Uses /api/embed (Ollama native) for direct backends,

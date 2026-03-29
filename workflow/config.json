@@ -26,7 +26,7 @@
     "enabled": true,
     "service_port": 3849,
     "embedding_backend": "ollama",
-    "embedding_model": "qwen3-embedding",
+    "embedding_model": "qwen3-embedding:0.6b",
     "fallback_backend": "sentence-transformers",
     "fallback_model": "BAAI/bge-m3",
     "ollama_base_url": "http://127.0.0.1:11434",

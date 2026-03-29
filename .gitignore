@@ -90,3 +90,4 @@ Thumbs.db
 *.swp
 *~
 memory/mail-sorting.md
+memory/_vectordb/reindex.log
