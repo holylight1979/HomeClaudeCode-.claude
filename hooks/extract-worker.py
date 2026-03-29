@@ -8,7 +8,7 @@ Three modes:
   - failure: failure-pattern extraction triggered by user complaints, writes to failure atoms
 
 Reads context from stdin (JSON), outputs results to stdout (JSON).
-Survives hook timeout — runs ~60s on GTX 1050 Ti.
+Survives hook timeout — runs ~60s on GTX 1650.
 """
 
 import json
@@ -18,6 +18,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime
+from wg_content_classify import classify_extracted_item
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -184,6 +185,7 @@ _RULES_COMMON = (
     "規則:\n"
     "- 只萃取此專案/環境特有的具體事實（含數值、路徑、版本、錯誤碼）\n"
     "- 跳過：程式碼片段、session 進度、隨便 Google 就能查到的知識\n"
+    "- 跳過：規劃/計畫/待辦/下一步/草稿/TODO/Phase 排程等未來意圖（只取已確定的事實）\n"
     "- 沒有值得萃取的內容就輸出 []\n"
     "- 直接輸出 JSON，不要解釋\n"
     "/no_think\n\n"
@@ -493,6 +495,14 @@ def run_extraction(ctx: Dict[str, Any]) -> Dict[str, Any]:
     # Cap items
     items = items[:max_items]
     if not items:
+        return _empty_result()
+
+    # V2.22: Content-type gate — filter out plan/draft items (route to _staging)
+    plan_items = [it for it in items if classify_extracted_item(it) == "plan"]
+    items = [it for it in items if classify_extracted_item(it) != "plan"]
+    if plan_items:
+        print(f"[v2.22] Filtered {len(plan_items)} plan-type items from extraction", file=sys.stderr)
+    if not items and not is_failure:
         return _empty_result()
 
     # Tag source

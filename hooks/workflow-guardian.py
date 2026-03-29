@@ -105,11 +105,8 @@ except ImportError:
 
 # (Intent, Topic Tracker, Session Context, MCP, Vector Service moved to wg_intent.py)
 
-# V2.15: Pre-compiled regex for _AIDocs content classification gate
-_AIDOCS_TEMP_PATTERNS = re.compile(
-    r"(?i)(plan|todo|roadmap|draft|wip|scratch|調查|規劃|暫存)"
-    r"|phase[- _]?\d"
-)
+# V2.22: Use shared content classifier (was inline _AIDOCS_TEMP_PATTERNS)
+from wg_content_classify import is_plan_filename, is_plan_content
 _SUPERSEDES_RE = re.compile(r"^- Supersedes:\s*(.+)", re.MULTILINE)
 
 # ─── Project Delegate Hook (V2.21) ───────────────────────────────────────────
@@ -876,7 +873,7 @@ def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         # V2.15: _AIDocs content classification gate — warn on temporary files
         if "/_AIDocs/" in normalized or "/_aidocs/" in normalized.lower():
             fname = normalized.rsplit("/", 1)[-1]
-            if _AIDOCS_TEMP_PATTERNS.search(fname):
+            if is_plan_filename(fname):
                 state["_aidocs_advisory"] = (
                     f"⚠ {fname} 看起來是暫時性文件，"
                     f"建議放 memory/_staging/ 而非 _AIDocs/。"
