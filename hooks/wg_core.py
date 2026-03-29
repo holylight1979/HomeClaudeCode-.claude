@@ -42,7 +42,6 @@ DEFAULTS = {
     "min_files_to_block": 2,
     "remind_after_turns": 3,
     "max_reminders": 3,
-    "stale_threshold_hours": 24,
     "sync_keywords": ["同步", "sync", "commit", "提交", "結束", "收工"],
     "completion_indicators": ["已同步", "同步完成", "已更新", "已提交", "committed"],
     # v2.2 Sprint 2: Session context injection

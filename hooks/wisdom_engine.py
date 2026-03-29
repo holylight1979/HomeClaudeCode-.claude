@@ -3,7 +3,6 @@
 wisdom_engine.py — Wisdom Engine V2.11
 
 Two forces: Situation Classifier (hard rules), Reflection Engine (enhanced).
-Causal Graph removed in V2.11 — stubs kept for API compat.
 Called by workflow-guardian.py. Cold start = zero tokens.
 """
 import json
@@ -39,23 +38,6 @@ def _save_json(path: Path, data: Any) -> None:
         print(f"[wisdom] save error {path.name}: {e}", file=sys.stderr)
         if tmp.exists():
             tmp.unlink()
-
-
-# ── [V2.11 移除] Causal Graph — stubs for API compat ────────────────────────
-
-def get_causal_warnings(touched_files: List[str], max_depth: int = 2) -> List[str]:
-    """Stub: causal graph removed in V2.11."""
-    return []
-
-
-def add_causal_edge(edge_from: str, edge_to: str, **kwargs) -> bool:
-    """Stub: causal graph removed in V2.11."""
-    return False
-
-
-def update_causal_confidence(edge_from: str, edge_to: str, hit: bool) -> None:
-    """Stub: causal graph removed in V2.11."""
-    pass
 
 
 # ── Force 1: Situation Classifier (V2.11 hard rules) ────────────────────────

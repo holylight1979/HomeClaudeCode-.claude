@@ -5,7 +5,6 @@
   "min_files_to_block": 2,
   "remind_after_turns": 3,
   "max_reminders": 3,
-  "stale_threshold_hours": 24,
   "dashboard_port": 3848,
   "sync_keywords": [
     "同步",
@@ -96,7 +95,7 @@
     "session_end_timeout_seconds": 10,
     "classification_default": "[臨]",
     "per_turn": {
-      "enabled": false,
+      "enabled": true,
       "min_new_chars": 500,
       "max_items": 3,
       "skip_cross_session": true,

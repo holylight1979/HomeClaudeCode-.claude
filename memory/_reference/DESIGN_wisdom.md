@@ -32,9 +32,7 @@ wisdom_engine.py (~170行, ~/.claude/hooks/)
 
 **移除原因**：冷啟動零邊、維護成本 > 收益。實際使用中 3 條種子 edge 未產生有效警告。
 
-**API 保留**：`get_causal_warnings()`、`add_causal_edge()`、`update_causal_confidence()` 保留為 no-op stub，確保 guardian.py import 不報錯。
-
-`causal_graph.json` 已清空為 `{}`。
+**V2.22 清理**：stub 函式 + `causal_graph.json` 已刪除（無任何呼叫端）。
 
 ---
 
