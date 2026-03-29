@@ -266,6 +266,8 @@ def _ensure_vector_service(config: Dict[str, Any]) -> None:
     try:
         import subprocess
         CREATE_NO_WINDOW = 0x08000000
+        DETACHED_PROCESS = 0x00000008
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
         log_path = CLAUDE_DIR / "memory" / "_vectordb" / "service.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = open(str(log_path), "a")
@@ -275,7 +277,7 @@ def _ensure_vector_service(config: Dict[str, Any]) -> None:
                 "stderr": log_fh,
             }
             if sys.platform == "win32":
-                kwargs["creationflags"] = CREATE_NO_WINDOW
+                kwargs["creationflags"] = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB
             subprocess.Popen(
                 [sys.executable, str(service_path)],
                 **kwargs,
