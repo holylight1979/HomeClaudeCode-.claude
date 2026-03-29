@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: 全域決策, workflow, guardian, hooks, MCP, 記憶系統決策, 記憶系統架構, 記憶系統, 原子記憶, atom memory, 決策
 - Last-used: 2026-03-29
-- Confirmations: 101
+- Confirmations: 102
 - Related: decisions-architecture
 
 ## 知識

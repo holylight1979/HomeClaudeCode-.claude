@@ -76,7 +76,7 @@ S4 → S5 → S6    ({線名})
 
 ---
 
-## C. Sprint 驗證報告模板（每個 Sprint 結束時 AI 產出）
+### C. Sprint 驗證報告模板（每個 Sprint 結束時 AI 產出）
 
 ```markdown
 ## Sprint S{N} 驗證報告
@@ -102,7 +102,11 @@ S4 → S5 → S6    ({線名})
 
 ---
 
-## D. Sprint 單元結構（寫在計畫文件中，每個 Sprint 一段）
+### D. Sprint 單元結構（寫在計畫文件中，每個 Sprint 一段）
+
+## 行動
+
+- ICLD 規劃時引用此模板產出 Sprint 計畫 + Prompt + 驗證報告
 
 ```markdown
 ### Sprint S{N}：{名稱}

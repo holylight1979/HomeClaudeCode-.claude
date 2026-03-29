@@ -28,6 +28,8 @@
 
 - [固] qwen3/3.5 的 /api/generate thinking mode 會把所有 token 花在 thinking 欄位，response 永遠為空 → 改用 /api/chat + `think: false`（根因: Ollama 0.17+ 預設啟用 thinking mode，/api/generate 不支援 think 參數）
 - [固] Ollama `format: "json"` 與 thinking mode 衝突 → constrained decoding 限制 thinking tokens 輸出格式，JSON 從未產生 → 移除 format，改用 prompt 引導 + regex 解析（根因: JSON constrained decoding 套用到 thinking output，不是 final response）
+- [固] Python subprocess stdout 在 Windows 預設為 cp950 編碼 → Node.js exec 當 UTF-8 解碼 → Dashboard 亂碼 → Python script 開頭強制 `sys.stdout = TextIOWrapper(sys.stdout.buffer, encoding='utf-8')` + Node exec env 注入 `PYTHONIOENCODING=utf-8`（根因: Windows console codepage cp950，Python sys.stdout.encoding 繼承系統 codepage，公司可能設了 chcp 65001 所以沒事）
+
 → Open WebUI 踩坑（proxy/embed/LDAP/failover）詳見 `toolchain.md`
 
 ### Playwright + Google
