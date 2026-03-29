@@ -10,6 +10,7 @@
 ## 知識
 
 ### 核心架構
+- [固] 原子記憶 V2.22：注入閘門修正。`wg_content_classify.py` 共用模組（plan/draft 判斷）；extract-worker classify gate + LLM prompt 排除 plan；wg_episodic 過濾 plan 型 knowledge_lines；_AIDOCS_TEMP_PATTERNS 統一為 is_plan_filename()
 - [固] 原子記憶 V2.21 Phase 4：現有資料遷移。`migrate-v221.py`（tools/）：_AIAtoms/*.md + 個人 memory/*.md 合併 → {project_root}/.claude/memory/；舊 MEMORY.md 改指標型（Status: migrated-v2.21）；project-registry.json 自動更新；已遷移：SGI / 加班系統 / FastSVNViewer
 - [固] 原子記憶 V2.21 Phase 3：專案自治層建置。`init-project` skill Step 6 建立 `.claude/` 結構（memory/, hooks/, .gitignore, MEMORY.md 模板, project_hooks.py delegate 模板）；`_call_project_hook()` subprocess 隔離呼叫（5s timeout, 全例外吞噬）；`handle_session_start` 末尾呼叫 on_session_start delegate
 - [固] 原子記憶 V2.21 Phase 2：Project Registry + 路徑切換。`register_project()` SessionStart 自動呼叫；`get_project_memory_dir()` 新路徑優先（{project_root}/.claude/memory/）；`find_project_root()` 加 `.claude/memory/MEMORY.md` 辨識；_AIAtoms merge 邏輯移除

@@ -12,6 +12,7 @@
 ### 回應捕獲
 - [固] 逐輪增量（Stop hook）+ SessionEnd 全量，共用 _spawn_extract_worker()
 - [固] 情境感知萃取：依 session intent 調整 prompt
+- [固] V2.22 Content-type Gate：`wg_content_classify.py` 共用模組，extract-worker 萃取後過濾 plan 型項目 + LLM prompt 排除規劃內容 + episodic 生成過濾 plan knowledge_lines
 - → 詳細參數見 `_reference/SPEC_impl_params.md`
 
 ### 基礎設施
