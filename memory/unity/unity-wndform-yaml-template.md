@@ -1,12 +1,11 @@
-# Unity WndForm Prefab YAML 模板
+# unity-wndform-yaml-template
 
 - Scope: global
 - Confidence: [固]
 - Trigger: WndForm template, prefab YAML, RefDb, AutoGenUICode, Scroller stack, Canvas template, prefab 建立
-- Last-used: 2026-03-25
-- Confirmations: 2
-- Related: unity-yaml, unity-prefab-component-guids, unity-prefab-workflow
-
+- Last-used: 2026-03-27
+- Confirmations: 1
+- Related: unity-prefab-workflow
 
 ## WndForm Prefab Root Structure
 

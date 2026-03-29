@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Type: semantic
 - Trigger: 記憶系統架構, 檔案結構, hook, skill, tool, 記憶升級, 記憶迭代, 目錄結構
-- Last-used: 2026-03-29
+- Last-used: 2026-03-27
 - Updated: 2026-03-23
 - Created: 2026-03-13
 - Confirmations: 58
@@ -32,6 +32,7 @@
 | `settings.json` | Hook 綁定 + 權限 + MCP |
 | `.mcp.json` | MCP server 定義 |
 | `workflow/config.json` | Guardian/Vector/WriteGate/Capture 參數 |
+| `install.py` | 一鍵安裝腳本（npm 套件 + ~/.claude.json MCP 合併 + bootstrap） |
 
 ### 規則模組（rules/）
 
@@ -47,6 +48,7 @@
 | 檔案 | 行數 | 用途 |
 |------|------|------|
 | `workflow-guardian.py` | ~1130 | 瘦身 dispatcher：6 event handlers 編排 |
+| `wg_paths.py` | ~290 | 路徑唯一真相來源：slug/root/staging/registry |
 | `wg_core.py` | ~266 | 共用常數/設定/state IO/output/debug |
 | `wg_atoms.py` | ~403 | 索引解析/trigger 匹配/ACT-R/載入/budget |
 | `wg_intent.py` | ~340 | 意圖分類/session context/MCP/vector service |
@@ -91,6 +93,7 @@
 | `read-excel.py` | Excel 讀取 |
 | `unity-yaml-tool.py` | Unity YAML 解析/生成 |
 | `rag-engine.py` | Vector Service CLI |
+| `migrate-v221.py` | V2.21 遷移工具（_AIAtoms + 個人記憶 → .claude/memory/） |
 | `cleanup-old-files.py` | 舊檔清理 |
 | `gdoc-harvester/` | Google Docs/Sheets 收割 |
 | `workflow-guardian-mcp/server.js` | MCP server + dashboard @ port 3848 |
@@ -100,11 +103,26 @@
 | 路徑 | 用途 |
 |------|------|
 | `MEMORY.md` | Atom 索引（always loaded） |
-| `*.md` (13 atoms) | 全域原子記憶 |
+| `project-registry.json` | 專案根路徑索引（V2.21，跨專案發現） |
+| `*.md` (25 atoms) | 全域原子記憶 |
 | `_reference/` | 參考文件：SPEC, self-iteration, v3-design, v3-research, decisions-history |
 | `episodic/` | 自動生成，TTL 24d（gitignore） |
 | `_vectordb/` | LanceDB 資料（gitignore） |
 | `_staging/` | 暫存區（gitignore） |
+
+### 專案自治層（{project_root}/.claude/）
+
+V2.21 新架構，每個專案的知識獨立存放：
+
+| 路徑 | 用途 |
+|------|------|
+| `.claude/memory/MEMORY.md` | 專案 atom 索引（取代舊 _AIAtoms/_ATOM_INDEX.md + 個人 MEMORY.md） |
+| `.claude/memory/*.md` | 專案 atoms（共享 + 個人合併） |
+| `.claude/memory/episodic/` | 自動生成（gitignore） |
+| `.claude/memory/failures/` | 踩坑記錄（版控） |
+| `.claude/memory/_staging/` | 暫存（gitignore） |
+| `.claude/hooks/project_hooks.py` | 專案 delegate（inject/extract/session_start） |
+| `.claude/.gitignore` | 排除 ephemeral 檔案 |
 
 ### 對外文件
 
@@ -130,3 +148,5 @@
 | 2026-03-19 | 精修：純索引化，移除架構描述，去重 decisions | 系統精修 |
 | 2026-03-19 | 更新 extract-worker/guardian 行數+功能（v2.13 failure mode） | failures 自動化 |
 | 2026-03-23 | Guardian 模組化：1 monolith → 7 模組（wg_core/atoms/intent/extraction/episodic/iteration） | 重構 Phase 1-6 |
+| 2026-03-27 | 新增 install.py（一鍵安裝腳本） | 安裝體驗改善 |
+| 2026-03-27 | V2.21 Phase 3-4：wg_paths.py + migrate-v221.py + 專案自治層 | V2.21 遷移 |

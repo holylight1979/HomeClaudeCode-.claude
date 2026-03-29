@@ -3,11 +3,11 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 架構細節, vector service, ollama backend, extraction, ACT-R, episodic tracking, context budget
-- Last-used: 2026-03-29
-- Confirmations: 96
+- Last-used: 2026-03-27
+- Confirmations: 93
 - Type: decision
 - Tags: architecture, infrastructure
-- Related: decisions, toolchain, toolchain-ollama, doc-index-system, silent-failures
+- Related: decisions, toolchain, toolchain-ollama, doc-index-system, silent-failures, DESIGN, SPEC_impl_params
 
 ## 知識
 
@@ -62,7 +62,7 @@
 
 ### 環境維護
 - [固] rules/ 模組化：CLAUDE.md ~50 行，4 規則檔自動載入
-- [固] Atom 健康度：atom-health-check.py（Related 完整性 + 懸空引用 + 過期掃描）；V2.18 新增 `--fix-refs` 模式：SessionEnd 自動呼叫，全域+專案層，冪等去重，10s timeout
+- [固] Atom 健康度：atom-health-check.py（Related 完整性 + 懸空引用 + 過期掃描）
 - [固] 環境清理：cleanup-old-files.py 定期清除 shell-snapshots/debug/workflow
 
 ## 行動
@@ -81,4 +81,3 @@
 | 2026-03-22 | 新增覆轍偵測（V2.17）段落（4 條 [觀]） | 覆轍偵測實作 |
 | 2026-03-23 | V2.17 合併升級至公司電腦 | 跨機合併 |
 | 2026-03-24 | 新增 Section-Level 注入（V2.18）段落（6 條 [固]） | Phase 2 實作 |
-| 2026-03-25 | 更新 Atom 健康度條目，補 V2.18 --fix-refs 細節 | 架構同步 |

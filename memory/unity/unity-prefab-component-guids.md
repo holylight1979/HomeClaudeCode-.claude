@@ -1,12 +1,11 @@
-# Unity Prefab Component GUIDs（SGI Client）
+# unity-prefab-component-guids
 
 - Scope: global
 - Confidence: [固]
 - Trigger: prefab GUID, component GUID, m_Script, ILUIWnd GUID, UIButtonCustom GUID, EnhancedScroller GUID, UI component registry
-- Last-used: 2026-03-25
-- Confirmations: 2
-- Related: unity-yaml, unity-wndform-yaml-template
-
+- Last-used: 2026-03-27
+- Confirmations: 1
+- Related: unity-prefab-workflow
 
 ## UI Component Script GUIDs (SGI Client, Unity 2022.3.62f2)
 
