@@ -48,7 +48,7 @@ A/B 對比：2 段真實 transcript（Redmine debug + NuGet build），各 4000 
 
 ### 硬體限制
 
-- [固] Local fallback（GTX 1050 Ti 4GB）同時只能跑一個模型，embedding 和推論需輪替；rdchat（RTX 3090）無此限制
+- [固] Local fallback（GTX 1650 4GB）同時只能跑一個模型，embedding 和推論需輪替；rdchat（RTX 3090）無此限制
 
 ## 行動
 

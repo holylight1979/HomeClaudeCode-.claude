@@ -21,7 +21,7 @@
 - [固] Ollama Dual-Backend: rdchat qwen3.5（主力萃取, pri=1）+ local qwen3:1.7b（fallback, pri=2）+ qwen3-embedding
 - [固] LanceDB（AVX2 支援），search_min_score: 0.65
 - [固] MCP 傳輸格式：JSONL，protocolVersion 2025-11-25
-- [固] _call_ollama_generate: num_predict=2048, timeout=120s（qwen3 thinking ~30s on GTX 1050 Ti）
+- [固] _call_ollama_generate: num_predict=2048, timeout=120s（qwen3 thinking ~30s on GTX 1650）
 - [固] extract-worker think=true + num_predict=8192（rdchat），detached subprocess
 
 ### 檢索強化
