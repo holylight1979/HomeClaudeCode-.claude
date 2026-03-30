@@ -41,7 +41,14 @@ const MEMORY_DIR = path.join(CLAUDE_DIR, "memory");
 const TOOLS_DIR = path.join(CLAUDE_DIR, "tools");
 const CONFIG_PATH = path.join(WORKFLOW_DIR, "config.json");
 const REGISTRY_PATH = path.join(MEMORY_DIR, "project-registry.json");
+const VERSION_PATH = path.join(CLAUDE_DIR, "version.json");
 const DASHBOARD_PORT = loadConfig().dashboard_port || 3848;
+
+function loadVersions() {
+  try { return JSON.parse(fs.readFileSync(VERSION_PATH, "utf-8")); }
+  catch { return { guardian: "0.0.0", atom_memory: "?" }; }
+}
+const VERSIONS = loadVersions();
 
 function loadRegistry() {
   try {
@@ -265,7 +272,7 @@ function handleMessage(msg) {
       sendResponse(id, {
         protocolVersion: "2025-11-25",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "workflow-guardian", version: "2.1.0" },
+        serverInfo: { name: "workflow-guardian", version: VERSIONS.guardian },
       });
       break;
 
@@ -588,11 +595,13 @@ function apiEpisodic(req, res) {
     }
     const atoms = [];
     for (const dir of dirsToScan) {
+      const epicDir = path.join(dir, "episodic");
+      if (!fs.existsSync(epicDir)) continue;
       try {
-        const files = fs.readdirSync(dir)
+        const files = fs.readdirSync(epicDir)
           .filter(f => f.startsWith("episodic-") && f.endsWith(".md"));
         for (const f of files) {
-          try { atoms.push(parseEpisodicAtom(path.join(dir, f))); }
+          try { atoms.push(parseEpisodicAtom(path.join(epicDir, f))); }
           catch {}
         }
       } catch {}
@@ -737,7 +746,12 @@ function apiProjects(req, res) {
       failure_count: 0,
       episodic_count: 0,
     };
-    const memDir = path.join(info.root || "", ".claude", "memory");
+    // V2.21: if root itself is the .claude dir, memory is at root/memory/ directly
+    const rootNorm = path.resolve(info.root || "");
+    const isClaudeDir = rootNorm.toLowerCase() === path.resolve(CLAUDE_DIR).toLowerCase();
+    const memDir = isClaudeDir
+      ? path.join(rootNorm, "memory")
+      : path.join(rootNorm, ".claude", "memory");
     if (fs.existsSync(memDir) && fs.existsSync(path.join(memDir, "MEMORY.md"))) {
       proj.has_memory = true;
       try {
@@ -883,7 +897,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>工作流守衛 v2.1</title>
+<title>工作流守衛 v${VERSIONS.guardian}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
@@ -1022,7 +1036,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div style="display:flex;justify-content:space-between;align-items:baseline;">
-  <div><h1>工作流守衛 v2.1</h1><p class="subtitle">記憶與對話監控</p></div>
+  <div><h1>工作流守衛 v${VERSIONS.guardian}</h1><p class="subtitle">記憶與對話監控</p></div>
   <div class="auto-refresh"><label><input type="checkbox" id="autoRefresh" checked> 自動重整 (5秒)</label></div>
 </div>
 
@@ -1032,7 +1046,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <button class="tab-btn active" data-tab="sessions">對話</button>
   <button class="tab-btn" data-tab="episodic">情境記憶</button>
   <button class="tab-btn" data-tab="health">健康檢查</button>
-  <button class="tab-btn" data-tab="atoms">原子記憶</button>
+  <button class="tab-btn" data-tab="atoms">原子記憶 v${VERSIONS.atom_memory}</button>
   <button class="tab-btn" data-tab="projects">已知專案</button>
   <button class="tab-btn" data-tab="tests">測試</button>
   <button class="tab-btn" data-tab="vector">向量服務</button>
@@ -1554,6 +1568,7 @@ function filterAtomsByProject(layerPrefix) {
 // ─── Atoms Browser ───
 
 let atomsData = [];
+const expandedAtoms = new Set();  // track expanded detail rows across refreshes
 
 async function renderAtoms() {
   const el = document.getElementById("atomsContent");
@@ -1566,9 +1581,17 @@ async function renderAtoms() {
       return;
     }
     renderAtomsTable(atomsData);
+    // restore filter
     if (savedFilter) {
       const fi = document.getElementById("atomFilter");
       if (fi) { fi.value = savedFilter; filterAtoms(savedFilter); }
+    }
+    // restore sort (reapply current sort key)
+    if (atomSortKey) { reapplySort(); }
+    // restore expanded rows
+    for (const name of expandedAtoms) {
+      const row = document.getElementById("detail-" + name);
+      if (row) row.style.display = "";
     }
   } catch (e) {
     el.innerHTML = '<div class="empty">載入原子記憶失敗：' + esc(e.message) + '</div>';
@@ -1626,23 +1649,35 @@ function buildAtomRows(atoms) {
 
 function toggleAtomDetail(name) {
   const row = document.getElementById("detail-" + name);
-  if (row) row.style.display = row.style.display === "none" ? "" : "none";
+  if (!row) return;
+  if (row.style.display === "none") {
+    row.style.display = "";
+    expandedAtoms.add(name);
+  } else {
+    row.style.display = "none";
+    expandedAtoms.delete(name);
+  }
 }
 
 let atomSortKey = "last_used";
 let atomSortAsc = false;
 
-function sortAtoms(key) {
-  if (atomSortKey === key) atomSortAsc = !atomSortAsc;
-  else { atomSortKey = key; atomSortAsc = key === "name"; }
-
-  const sorted = [...atomsData].sort((a, b) => {
-    let va = a[key] ?? "", vb = b[key] ?? "";
+function applySortToBody(data) {
+  const sorted = [...data].sort((a, b) => {
+    let va = a[atomSortKey] ?? "", vb = b[atomSortKey] ?? "";
     if (typeof va === "number" && typeof vb === "number") return atomSortAsc ? va - vb : vb - va;
     va = String(va); vb = String(vb);
     return atomSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
   });
   document.getElementById("atomTableBody").innerHTML = buildAtomRows(sorted);
+}
+
+function reapplySort() { applySortToBody(atomsData); }
+
+function sortAtoms(key) {
+  if (atomSortKey === key) atomSortAsc = !atomSortAsc;
+  else { atomSortKey = key; atomSortAsc = key === "name"; }
+  applySortToBody(atomsData);
 }
 
 function filterAtoms(query) {
@@ -1654,7 +1689,12 @@ function filterAtoms(query) {
     if ((a.layer||"").toLowerCase().includes(q)) return true;
     return false;
   });
-  document.getElementById("atomTableBody").innerHTML = buildAtomRows(filtered);
+  applySortToBody(filtered);
+  // restore expanded rows after filter rebuild
+  for (const name of expandedAtoms) {
+    const row = document.getElementById("detail-" + name);
+    if (row) row.style.display = "";
+  }
 }
 
 // ─── Auto Refresh ───

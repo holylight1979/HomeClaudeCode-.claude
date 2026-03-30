@@ -6,7 +6,7 @@
 - Trigger: svn, svn-update, TortoiseSVN, 衝突, conflict
 - Last-used: 2026-03-30
 - Created: 2026-03-18
-- Confirmations: 99
+- Confirmations: 100
 - Tags: svn, vcs
 - Related: workflow-rules
 

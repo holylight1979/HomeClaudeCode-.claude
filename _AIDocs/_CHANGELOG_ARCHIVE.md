@@ -6,6 +6,8 @@
 
 | 日期 | 變更 | 涉及檔案 |
 |------|------|---------|
+| 2026-03-24 | **V2.18 Phase 2 Section-Level 注入**：向量服務新增 `ranked_search_sections()` + `/search/ranked-sections` endpoint。`_semantic_search()` 回傳帶 sections。注入迴圈新增 section 提取（`_extract_sections()`），大 atom 省 69-87% tokens。安全防護：0 匹配/70% 閾值/服務不可用皆 fallback 全量注入 | `searcher.py`, `service.py`, `wg_intent.py`, `wg_atoms.py`, `workflow-guardian.py` |
+| 2026-03-23 | **V2.18 Phase 0+1**：環境清理（LanceDB 289→25MB、刪 7 死檔）+ 9 atom Trigger 精準化 + misdiagnosis/harvester 內容精簡 | `memory/*.md`, `MEMORY.md`, `workflow/config.json` |
 | 2026-03-23 | **V2.17 合併升級**：V2.16 自我迭代自動化 + V2.17 覆轍偵測 + AIDocs 內容閘門 + WebFetch Guard | `hooks/workflow-guardian.py`, `settings.json`, `rules/aidocs.md`, `memory/decisions*.md`, `CLAUDE.md`, `README.md`, `_AIDocs/*.md` |
 | 2026-03-19 | **V2.15 定義版本**：全文件版本號 V2.12→V2.15 統一。README 版本歷史補 V2.13/V2.14/V2.15 | `CLAUDE.md`, `README.md`, `Install-forAI.md`, `_AIDocs/*.md`, `memory/decisions*.md`, `rules/session-management.md` |
 | 2026-03-19 | **V2.14 Token Diet**：`_strip_atom_for_injection()` 注入前 strip 9 種 metadata + 行動/演化日誌。SessionEnd 從 byte_offset 跳已萃取段。cross-session lazy search 預篩。省 ~1550 tok/session | `hooks/workflow-guardian.py`, `hooks/extract-worker.py`, `memory/MEMORY.md`, `workflow/config.json` |
