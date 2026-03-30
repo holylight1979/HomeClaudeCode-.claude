@@ -223,6 +223,7 @@ def _proactive_classify(
 
 def _check_mcp_servers() -> List[str]:
     """Verify .mcp.json server entries: command + script must exist on disk."""
+    import shutil
     issues: List[str] = []
     mcp_path = CLAUDE_DIR / ".mcp.json"
     if not mcp_path.exists():
@@ -234,7 +235,8 @@ def _check_mcp_servers() -> List[str]:
         for name, srv in servers.items():
             cmd = srv.get("command", "")
             args = srv.get("args", [])
-            if cmd and not Path(cmd).exists():
+            # Commands may be bare names (e.g. "node") in PATH, not full paths
+            if cmd and not Path(cmd).exists() and not shutil.which(cmd):
                 issues.append(f"{name}: command not found ({cmd})")
             if args:
                 script = args[0]
@@ -264,14 +266,28 @@ def _ensure_vector_service(config: Dict[str, Any]) -> None:
     try:
         import subprocess
         CREATE_NO_WINDOW = 0x08000000
+        DETACHED_PROCESS = 0x00000008
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
         log_path = CLAUDE_DIR / "memory" / "_vectordb" / "service.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(
-            [sys.executable, str(service_path)],
-            creationflags=CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL,
-            stderr=open(str(log_path), "a"),
-        )
+        log_fh = open(str(log_path), "a")
+        try:
+            kwargs = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": log_fh,
+            }
+            if sys.platform == "win32":
+                kwargs["creationflags"] = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB
+            subprocess.Popen(
+                [sys.executable, str(service_path)],
+                **kwargs,
+            )
+            # Note: log_fh intentionally NOT closed here — the child process
+            # inherits the fd and writes to it. Closing would truncate output.
+            # The fd is released when the child exits or this process exits.
+        except Exception:
+            log_fh.close()
+            raise
     except Exception as e:
         _atom_debug_error("注入:_ensure_vector_service:start", e)
 

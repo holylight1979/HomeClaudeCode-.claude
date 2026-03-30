@@ -3,7 +3,6 @@
 wisdom_engine.py — Wisdom Engine V2.11
 
 Two forces: Situation Classifier (hard rules), Reflection Engine (enhanced).
-Causal Graph removed in V2.11 — stubs kept for API compat.
 Called by workflow-guardian.py. Cold start = zero tokens.
 """
 import json
@@ -16,9 +15,6 @@ WISDOM_DIR = Path.home() / ".claude" / "memory" / "wisdom"
 REFLECTION_PATH = WISDOM_DIR / "reflection_metrics.json"
 
 ARCH_KEYWORDS = {"架構", "refactor", "重構", "migrate", "migration", "重寫"}
-
-# Module-level state for silence_accuracy tracking (same process as guardian)
-_last_approach: str = "direct"
 
 
 def _load_json(path: Path, default: Any) -> Any:
@@ -44,29 +40,10 @@ def _save_json(path: Path, data: Any) -> None:
             tmp.unlink()
 
 
-# ── [V2.11 移除] Causal Graph — stubs for API compat ────────────────────────
-
-def get_causal_warnings(touched_files: List[str], max_depth: int = 2) -> List[str]:
-    """Stub: causal graph removed in V2.11."""
-    return []
-
-
-def add_causal_edge(edge_from: str, edge_to: str, **kwargs) -> bool:
-    """Stub: causal graph removed in V2.11."""
-    return False
-
-
-def update_causal_confidence(edge_from: str, edge_to: str, hit: bool) -> None:
-    """Stub: causal graph removed in V2.11."""
-    pass
-
-
 # ── Force 1: Situation Classifier (V2.11 hard rules) ────────────────────────
 
 def classify_situation(prompt_analysis: Dict[str, Any]) -> Dict[str, str]:
     """Hard rules → approach (direct/confirm/plan) + inject string."""
-    global _last_approach
-
     keywords = set(prompt_analysis.get("keywords", []))
     file_count = prompt_analysis.get("estimated_files", 1)
     is_feature = prompt_analysis.get("intent", "") == "feature"
@@ -84,7 +61,8 @@ def classify_situation(prompt_analysis: Dict[str, Any]) -> Dict[str, str]:
     else:
         result = {"approach": "direct", "inject": ""}
 
-    _last_approach = result["approach"]
+    # V2.11: _last_approach removed — approach is now persisted in
+    # state["wisdom_approach"] by the caller (workflow-guardian.py).
     return result
 
 
@@ -181,7 +159,7 @@ def reflect(state: Dict[str, Any]) -> None:
     arch = faa.get("architecture", {"correct": 0, "total": 0})
     if arch["total"] >= 3 and arch["correct"] / max(arch["total"], 1) < 0.34:
         metrics["arch_sensitivity_elevated"] = True
-    elif arch["total"] >= 3 and arch["correct"] / arch["total"] >= 0.5:
+    elif arch["total"] >= 3 and arch["correct"] / max(arch["total"], 1) >= 0.5:
         metrics["arch_sensitivity_elevated"] = False
 
     metrics["last_reflection"] = datetime.now(timezone.utc).isoformat()

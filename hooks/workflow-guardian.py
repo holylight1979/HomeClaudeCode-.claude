@@ -105,6 +105,10 @@ except ImportError:
 
 # (Intent, Topic Tracker, Session Context, MCP, Vector Service moved to wg_intent.py)
 
+# V2.22: Use shared content classifier (was inline _AIDOCS_TEMP_PATTERNS)
+from wg_content_classify import is_plan_filename, is_plan_content
+_SUPERSEDES_RE = re.compile(r"^- Supersedes:\s*(.+)", re.MULTILINE)
+
 # ─── Project Delegate Hook (V2.21) ───────────────────────────────────────────
 
 
@@ -521,7 +525,6 @@ def handle_user_prompt_submit(
 
     # ── Supersedes filtering (v2.1 Sprint 3) ────────────────────
     # If atom A supersedes atom B, and both matched, drop B
-    SUPERSEDES_RE = re.compile(r"^- Supersedes:\s*(.+)", re.MULTILINE)
     superseded_names: set = set()
     for (name, rel_path, triggers), base_dir in matched_with_dir:
         atom_path = (base_dir / rel_path) if rel_path else (base_dir / "memory" / f"{name}.md")
@@ -531,7 +534,7 @@ def handle_user_prompt_submit(
             text = atom_path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue
-        sm = SUPERSEDES_RE.search(text)
+        sm = _SUPERSEDES_RE.search(text)
         if sm:
             for old in sm.group(1).split(","):
                 old = old.strip()
@@ -870,11 +873,7 @@ def handle_post_tool_use(input_data: Dict[str, Any], config: Dict[str, Any]) -> 
         # V2.15: _AIDocs content classification gate — warn on temporary files
         if "/_AIDocs/" in normalized or "/_aidocs/" in normalized.lower():
             fname = normalized.rsplit("/", 1)[-1]
-            _TEMP_PATTERNS = re.compile(
-                r"(?i)(plan|todo|roadmap|draft|wip|scratch|調查|規劃|暫存)"
-                r"|phase[- _]?\d"
-            )
-            if _TEMP_PATTERNS.search(fname):
+            if is_plan_filename(fname):
                 state["_aidocs_advisory"] = (
                     f"⚠ {fname} 看起來是暫時性文件，"
                     f"建議放 memory/_staging/ 而非 _AIDocs/。"
