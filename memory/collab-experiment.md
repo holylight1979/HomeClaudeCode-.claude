@@ -17,7 +17,14 @@
 - [觀] 測試頻道：1484061896217858178（可在此頻道叫另一個 bot 做實機測試）
 - [觀] 協作知識庫路徑：`~/.claude/collab/`（版控於 HomeClaudeCode-.claude）
 
+## Sprint 3 候選目標（backlog）
+
+- [觀] `session:end` 從未 emit → `extractFullScan` / `evaluatePromotions` 從未執行，全量掃描死路
+- [觀] `consolidate()` 未定時呼叫 → atoms 永遠停在 [臨]，無法晉升 [觀]
+- [觀] Ollama 萃取耗時 ~60s（qwen3:14b）→ 高流量下排隊積累風險
+
 ## 行動
 
 - 收到「啟動 Sprint X 自主開發」類請求 → 讀 `~/.claude/collab/AI-Human-Collaboration-Guide.md` 確認完整流程
 - 開工前必須先向 Wells 回報目標清單 + agent 分工計畫，不可直接動手
+- Sprint 3 開始時，優先從上方 backlog 選目標
