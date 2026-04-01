@@ -30,3 +30,5 @@
 | feedback-global-install | memory/feedback_global_install.md | 安裝MCP, 安裝skill, install MCP, install skill, add MCP, 新增MCP, 新增skill |
 | nodejs-ecosystem | memory/nodejs-ecosystem.md | Node.js, NodeJS, npm, npx, package.json, node_modules, TypeScript, tsc, pm2, ecosystem.config, JavaScript, JS, TS, ESM, CommonJS, CJS |
 | collab-anchor | memory/collab-anchor.md | CatClaw, 個人專案, 跑偏, 過度擴張, 焦慮, 收斂, 方向校正, 提醒, 副駕, 協作規則, 邊界, 失焦, 方向, 副駕規則 |
+| reference-claudecode | memory/reference-claudecode.md | Claude Code, claudecode, claude code 架構, context 管理, token 控制, session 處理, 安全邊界 |
+| collab-experiment | memory/collab-experiment.md | AI自主開發, AI自主, Sprint自主, 協作實驗, harness agent, subagent協作, PM角色, AI當開發, 啟動協作實驗, 協作模式 |
