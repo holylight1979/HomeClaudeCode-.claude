@@ -950,6 +950,130 @@ npx pm2 logs catclaw --lines 50 --nostream 2>&1 | grep -E "功能關鍵字"
 
 ---
 
+## 13. Sprint 3 進化規則（v1.1 補充）
+
+> 以下規則來自 Sprint 3 實際執行過程中 Wells 的明確要求，是對 Sprint 2 指南的補充與強化。
+
+### 13.1 三段式回報協議
+
+每個目標執行期間，AI 必須進行三段回報：
+
+| 階段 | 時機 | 內容 |
+|------|------|------|
+| **事前** | 開始任何實作前 | 目標名稱、計畫摘要、幾個 agent 分別做什麼、預計影響範圍 |
+| **事中** | 每個 agent 完成時 | 當前進度（Design✅/Dev✅/QA✅）、發現的問題、token 用量 |
+| **事後** | 全部完成 + commit 後 | 完成結論、commit hash、token 總計、驗證結果 |
+
+**核心原則**：PM 永遠知道 AI 在做什麼、做到哪裡、花了多少 token。
+
+---
+
+### 13.2 Token 追蹤義務
+
+每個目標完成後，AI **必須**在事後回報中附上 token 用量：
+
+```markdown
+| 階段 | Token |
+|------|-------|
+| Design Agent | ~XX,000 |
+| Security Agent | ~XX,000 |
+| Dev Agent | ~XX,000 |
+| QA Agent | ~XX,000 |
+| Test Agent | ~XX,000 |
+| 主對話 + 溝通 | ~XX,000 |
+| **本目標合計** | **~XXX,000** |
+```
+
+Token 計算方式：從 Agent tool 的 `<usage>total_tokens: N</usage>` 欄位讀取，主對話估算。
+
+---
+
+### 13.3 中斷處理與接回機制
+
+在多目標長時間執行時，中斷（token 上限、網路中斷、PM 叫停）是必然的。
+
+**預防：Design 完成後存 checkpoint**
+
+每個目標的 Design Agent 完成後，立即將規格存入：
+```
+catclaw/.claude/memory/_staging/{目標代號}-spec.md
+```
+
+內容包含：問題描述、影響檔案、具體修改清單、安全注意事項。
+
+**接回：新 session 讀 checkpoint**
+
+開新 session 時，讀 `_staging/{目標代號}-spec.md` 直接進入 Dev 階段，不需重做 Design。
+
+**接回 SOP**：
+```
+1. 讀 collab-experiment atom → 知道 sprint 目標和 backlog
+2. 讀 _staging/*.md → 知道哪些目標設計好了但未實作
+3. git log --oneline -10 → 知道哪些已 commit
+4. 繼續未完成的目標
+```
+
+---
+
+### 13.4 Context 自我管理
+
+當 AI 感知到 context 接近上限時（回應變慢、壓縮提示出現），應主動處理：
+
+**判斷流程**：
+```
+Context 使用率 > 70%？
+├── 是 → 當前目標做完了嗎？
+│   ├── 是 → 立即存 atom + 更新 CHANGELOG + 提醒 PM 開新 session
+│   └── 否 → 存 _staging checkpoint → 然後提醒 PM 開新 session
+└── 否 → 繼續
+```
+
+**處理優先順序（依情況選擇）**：
+1. **已有 Design 規格未實作** → 存 checkpoint，新 session 繼續
+2. **實作中途** → 完成當前檔案的修改（最小可 commit 狀態）→ commit → 存進度 → 提醒開新 session
+3. **全部完成但未同步** → 先 commit 和 push，再提醒開新 session
+4. **純閱讀/討論階段** → 直接提醒開新 session（沒有狀態需要儲存）
+
+**不可接受的行為**：
+- 默默讓 context 爆掉而不提醒
+- 在 context 快滿時還啟動新目標
+- 程式碼修改到一半就斷掉（確保每次停點都是 tsc 零錯誤的狀態）
+
+---
+
+### 13.5 多目標並行策略
+
+Sprint 3 採用「先批量找目標，再安排實作」的改進模式（vs Sprint 2 的「完成一個找下一個」）。
+
+**目標搜尋策略**：
+1. 一次 Explore Agent 掃描整個 codebase
+2. 根據以下分類排序：
+   - 🔴 高：blocking / 嚴重 bug / 影響穩定性
+   - 🟡 中：功能改善 / 安全強化
+   - 🟢 低：觀測性 / 文件 / 清理
+3. 一次回報 4-8 個目標清單給 PM 確認
+4. PM 確認後，同時啟動 2-3 個相互獨立的目標
+
+**並行規則**：
+- 影響同一個檔案的目標不能並行（避免 merge conflict）
+- 有依賴關係的目標必須串行（B1 依賴 session.ts 改好才能測試 B2）
+- 獨立目標（不同模組、不同檔案）可以並行
+
+---
+
+### 13.6 指南維護規則
+
+本指南是活文件，隨每次 Sprint 更新：
+
+- **有新規則/守則** → 加入對應章節
+- **有新踩坑** → 加入第 10 章踩坑紀錄
+- **有新 commit** → 更新附錄 A
+- **有架構決策** → 可能需要更新第 5-6 章
+
+指南位置：`~/.claude/collab/AI-Human-Collaboration-Guide.md`（版控於 HomeClaudeCode-.claude）
+
+---
+
 ## 附錄 A：本實驗完整 Commit 記錄
 
 | Commit | 說明 | 省 Token 評等 |
@@ -972,6 +1096,8 @@ npx pm2 logs catclaw --lines 50 --nostream 2>&1 | grep -E "功能關鍵字"
 | `a62e410` | llmSelect config 預設 false | ★★★ |
 | `82a23cc` | vector namespace mismatch 修正 | ★★★★★ |
 | `17d4375` | spawn-subagent namespace 同步修正 | ★★★ |
+| `cb206c6` | B1+B2：session:end 接線 + consolidate 排程 | ★★★ |
+| `f55c115` | C11+C8+C10：mention 過濾 + config 備份 + web 監控 | ★★ |
 
 ---
 
