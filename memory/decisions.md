@@ -2,10 +2,9 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: 全域決策, workflow, guardian, hooks, MCP, 記憶系統決策, 記憶系統架構
+- Trigger: 全域決策, workflow, guardian, hooks, MCP, 記憶系統決策, 記憶系統架構, 記憶系統, 原子記憶, atom memory, 決策
 - Last-used: 2026-04-01
-- Confirmations: 111
-- Type: decision
+- Confirmations: 112
 - Related: decisions-architecture
 
 ## 知識
@@ -30,8 +29,8 @@
 - [固] SessionEnd 萃取由 extract-worker.py detached subprocess 執行（hook timeout 不足）
 
 ### 跨 Session 鞏固
-- [固] 廢除自動晉升 [臨]→[觀]，改為 Confirmations +1 簡單計數
-- [固] 4+ sessions 命中 → 建議晉升（不自動執行）
+- [固] V2.16 自動晉升 [臨]→[觀]：Confirmations ≥ 20 時 SessionEnd 自動執行
+- [固] [觀]→[固] 晉升：4+ sessions 命中 → 建議晉升（不自動執行，需使用者同意）
 
 ### Episodic
 - [固] SessionEnd 自動生成，TTL 24d，靠 vector search 發現（不列入 MEMORY.md）
@@ -48,7 +47,7 @@
 - [固] V2.18 反向參照自動修復：SessionEnd 呼叫 `atom-health-check.py --fix-refs`（全域+專案層），冪等去重，10s timeout
 
 ### Wisdom Engine
-- [固] 2 硬規則（file_count+is_feature → confirm; touches_arch+file_count → plan）
+- [固] 2 硬規則（touches_arch OR file_count>threshold → plan; file_count>2 AND is_feature → confirm）
 - [固] 冷啟動零 token，注入上限 ≤90 tokens，lazy import + graceful fallback
 
 ### Fix Escalation
