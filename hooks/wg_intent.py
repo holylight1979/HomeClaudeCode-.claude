@@ -260,6 +260,14 @@ def _ensure_vector_service(config: Dict[str, Any]) -> None:
             return
     except Exception as e:
         _atom_debug_error("注入:_ensure_vector_service:health", e)
+    # Port guard: 若 port 已被佔用（service 啟動中但 health 尚未就緒），不重複 spawn
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if sock.connect_ex(("127.0.0.1", port)) == 0:
+            return  # port occupied — service likely starting up
+    finally:
+        sock.close()
     service_path = CLAUDE_DIR / "tools" / "memory-vector-service" / "service.py"
     if not service_path.exists():
         return
