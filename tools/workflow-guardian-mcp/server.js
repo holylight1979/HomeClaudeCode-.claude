@@ -378,6 +378,67 @@ const TOOL_DEFINITIONS = [
       required: ["session_id"],
     },
   },
+  {
+    name: "atom_write",
+    description:
+      "Write or update an atom file with validated format. " +
+      "Ensures correct metadata structure, runs write-gate dedup, " +
+      "updates MEMORY.md index, and triggers vector indexing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Atom title (becomes # heading and filename slug)" },
+        scope: { type: "string", enum: ["global", "project"], description: "global or project scope" },
+        confidence: { type: "string", enum: ["[固]", "[觀]", "[臨]"], description: "Confidence level" },
+        triggers: {
+          type: "array", items: { type: "string" },
+          description: "Trigger keywords for MEMORY.md index",
+        },
+        knowledge: {
+          type: "array", items: { type: "string" },
+          description: "Knowledge lines (each prefixed with [固]/[觀]/[臨])",
+        },
+        actions: {
+          type: "array", items: { type: "string" },
+          description: "Action guidelines",
+        },
+        related: {
+          type: "array", items: { type: "string" },
+          description: "Related atom names (optional)",
+        },
+        mode: {
+          type: "string", enum: ["create", "append", "replace"],
+          description: "create=new atom, append=add knowledge lines, replace=overwrite knowledge section",
+        },
+        project_cwd: {
+          type: "string",
+          description: "Project root path (required when scope=project)",
+        },
+        skip_gate: {
+          type: "boolean",
+          description: "Skip write-gate quality check (for [固] or explicit user request)",
+        },
+      },
+      required: ["title", "scope", "confidence", "triggers", "knowledge", "mode"],
+    },
+  },
+  {
+    name: "atom_promote",
+    description:
+      "Promote an atom's confidence level. " +
+      "Checks promotion thresholds: [臨]≥20 confirmations→[觀], [觀]≥40→[固]. " +
+      "Use execute=false for dry-run.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        atom_name: { type: "string", description: "Atom filename without .md extension" },
+        scope: { type: "string", enum: ["global", "project"], description: "Scope to search in" },
+        project_cwd: { type: "string", description: "Project root (required for project scope)" },
+        execute: { type: "boolean", description: "true=execute promotion, false=dry-run check only" },
+      },
+      required: ["atom_name", "scope", "execute"],
+    },
+  },
 ];
 
 // ─── Tool Handlers ──────────────────────────────────────────────────────────
@@ -392,6 +453,10 @@ function handleToolCall(id, toolName, args) {
       return toolMemoryQueueAdd(id, args);
     case "memory_queue_flush":
       return toolMemoryQueueFlush(id, args);
+    case "atom_write":
+      return toolAtomWrite(id, args).catch(e => sendToolResult(id, `atom_write error: ${e.message}`, true));
+    case "atom_promote":
+      return toolAtomPromote(id, args);
     default:
       sendError(id, -32601, `Unknown tool: ${toolName}`);
   }
@@ -523,6 +588,434 @@ function toolMemoryQueueFlush(id, args) {
   writeState(resolved, state);
 
   return sendToolResult(id, `Flushed ${count} knowledge queue items.`);
+}
+
+// ─── Atom Write/Promote Helpers ────────────────────────────────────────────
+
+/** Convert title to a safe filename slug (lowercase, hyphens, no special chars) */
+function slugify(title) {
+  return title
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9\u4e00-\u9fff\u3400-\u4dbf-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    || "untitled";
+}
+
+/** Build atom file content from structured parameters */
+function buildAtomContent({ title, scope, confidence, triggers, knowledge, actions, related }) {
+  const lines = [`# ${title}`, ""];
+  lines.push(`- Scope: ${scope}`);
+  lines.push(`- Confidence: ${confidence}`);
+  lines.push(`- Trigger: ${triggers.join(", ")}`);
+  lines.push(`- Last-used: ${new Date().toISOString().slice(0, 10)}`);
+  lines.push("- Confirmations: 0");
+  if (related && related.length > 0) {
+    lines.push(`- Related: ${related.join(", ")}`);
+  }
+  lines.push("", "## 知識", "");
+  for (const k of knowledge) {
+    lines.push(k.startsWith("- ") ? k : `- ${k}`);
+  }
+  lines.push("", "## 行動", "");
+  if (actions && actions.length > 0) {
+    for (const a of actions) {
+      lines.push(a.startsWith("- ") ? a : `- ${a}`);
+    }
+  } else {
+    lines.push("- （依知識內容判斷）");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** Validate atom content structure. Returns null if valid, error string if invalid. */
+function validateAtomContent(content) {
+  if (content.includes("---\n") && content.indexOf("---\n") < 5) {
+    return "YAML frontmatter (---) is forbidden in atom files";
+  }
+  if (!content.match(/^# .+/m)) {
+    return "Missing # title heading";
+  }
+  if (!content.includes("## 知識")) {
+    return "Missing ## 知識 section";
+  }
+  if (!content.includes("## 行動")) {
+    return "Missing ## 行動 section";
+  }
+  const confMatch = content.match(/^- Confidence:\s*(.+)$/m);
+  if (!confMatch || !["[固]", "[觀]", "[臨]"].includes(confMatch[1].trim())) {
+    return "Missing or invalid Confidence metadata";
+  }
+  return null;
+}
+
+/** Resolve the memory directory for a given scope */
+function resolveMemDir(scope, projectCwd) {
+  if (scope === "project" && projectCwd) {
+    const projMem = path.join(projectCwd, ".claude", "memory");
+    if (fs.existsSync(projMem)) return projMem;
+    // Also check Claude projects dir
+    const norm = projectCwd.replace(/\\/g, "/").replace(/\/+$/, "");
+    const slug = norm.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+    const projDir = path.join(CLAUDE_DIR, "projects", slug, "memory");
+    if (fs.existsSync(projDir)) return projDir;
+    return projMem; // default: create under project root
+  }
+  return MEMORY_DIR;
+}
+
+/** Find MEMORY.md path for a given scope */
+function resolveMemoryIndex(memDir) {
+  const indexPath = path.join(memDir, "MEMORY.md");
+  return indexPath;
+}
+
+/** Run write-gate Python script for dedup check. Returns Promise<{action, reason}> */
+function execWriteGate(content, classification) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(TOOLS_DIR, "memory-write-gate.py");
+    if (!fs.existsSync(scriptPath)) {
+      return resolve({ action: "add", reason: "write-gate script not found, allowing" });
+    }
+    // Escape content for CLI: use stdin via echo pipe
+    const escaped = JSON.stringify({ content, classification });
+    const cmd = `echo ${escaped.replace(/"/g, '\\"')} | python "${scriptPath.replace(/\\/g, "/")}"`;
+    exec(cmd, { timeout: 15000 }, (err, stdout) => {
+      if (err || !stdout) {
+        return resolve({ action: "add", reason: "write-gate unavailable, allowing" });
+      }
+      try {
+        const result = JSON.parse(stdout.trim());
+        resolve(result);
+      } catch {
+        resolve({ action: "add", reason: "write-gate parse error, allowing" });
+      }
+    });
+  });
+}
+
+/** Append or update an atom entry in MEMORY.md index table */
+function appendToIndex(memDir, atomName, relPath, triggers) {
+  const indexPath = resolveMemoryIndex(memDir);
+  const triggerStr = triggers.join(", ");
+  const newRow = `| ${atomName} | ${relPath} | ${triggerStr} |`;
+
+  let content = "";
+  try {
+    content = fs.readFileSync(indexPath, "utf-8");
+  } catch {
+    // Create new MEMORY.md with table header
+    content = [
+      "# Atom Index",
+      "",
+      "> Session 啟動時先讀此索引。比對 Trigger → Read 對應 atom。",
+      "| Atom | Path | Trigger |",
+      "|------|------|---------|",
+      "",
+    ].join("\n");
+  }
+
+  // Check if atom already exists in the table
+  const escapedName = atomName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const existingRe = new RegExp(`^\\|\\s*${escapedName}\\s*\\|.*$`, "m");
+  if (existingRe.test(content)) {
+    // Update existing row
+    content = content.replace(existingRe, newRow);
+  } else {
+    // Insert before the first empty line after the table header separator
+    const sepIdx = content.indexOf("|------|");
+    if (sepIdx >= 0) {
+      const afterSep = content.indexOf("\n", sepIdx);
+      if (afterSep >= 0) {
+        // Find the end of the table (first line that doesn't start with |)
+        const lines = content.split("\n");
+        let insertIdx = -1;
+        let foundSep = false;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith("|------")) { foundSep = true; continue; }
+          if (foundSep && !lines[i].startsWith("|")) {
+            insertIdx = i;
+            break;
+          }
+        }
+        if (insertIdx >= 0) {
+          lines.splice(insertIdx, 0, newRow);
+          content = lines.join("\n");
+        } else {
+          // Table runs to end of file
+          content = content.trimEnd() + "\n" + newRow + "\n";
+        }
+      }
+    } else {
+      // No table found, append
+      content += "\n" + newRow + "\n";
+    }
+  }
+
+  // Write atomically
+  const tmp = indexPath + ".tmp";
+  fs.writeFileSync(tmp, content, "utf-8");
+  fs.renameSync(tmp, indexPath);
+}
+
+/** Trigger vector service re-index (fire and forget) */
+function triggerVectorReindex() {
+  try {
+    const url = "http://127.0.0.1:3849/reindex";
+    const req = http.request(url, { method: "POST", timeout: 3000 }, () => {});
+    req.on("error", () => {}); // ignore
+    req.end();
+  } catch {}
+}
+
+/** Parse atom metadata from file content. Returns {confidence, confirmations, ...} */
+function parseAtomMeta(content) {
+  const meta = {};
+  const re = /^- ([\w-]+):\s*(.+)$/gm;
+  let m;
+  while ((m = re.exec(content)) !== null) {
+    const key = m[1].toLowerCase();
+    const val = m[2].trim();
+    switch (key) {
+      case "confidence": meta.confidence = val; break;
+      case "confirmations": meta.confirmations = parseInt(val, 10) || 0; break;
+      case "scope": meta.scope = val; break;
+      case "trigger": meta.triggers = val; break;
+      case "last-used": meta.lastUsed = val; break;
+      case "related": meta.related = val; break;
+    }
+  }
+  const titleMatch = content.match(/^# (.+)$/m);
+  if (titleMatch) meta.title = titleMatch[1];
+  return meta;
+}
+
+// ─── Atom Write Handler ────────────────────────────────────────────────────
+
+async function toolAtomWrite(id, args) {
+  const { title, scope, confidence, triggers, knowledge, actions, related, mode, project_cwd, skip_gate } = args;
+
+  // Validate required fields
+  if (!title || !scope || !confidence || !triggers || !knowledge || !mode) {
+    return sendToolResult(id, "Missing required parameters (title, scope, confidence, triggers, knowledge, mode)", true);
+  }
+
+  const memDir = resolveMemDir(scope, project_cwd);
+  const slug = slugify(title);
+  const filePath = path.join(memDir, slug + ".md");
+  const relPath = "memory/" + slug + ".md";
+
+  // ── Mode: create ──
+  if (mode === "create") {
+    if (fs.existsSync(filePath)) {
+      return sendToolResult(id, `Atom already exists: ${slug}.md — use mode=append or mode=replace`, true);
+    }
+
+    // Write-gate check (unless skipped)
+    if (!skip_gate && confidence !== "[固]") {
+      const gateResult = await execWriteGate(knowledge.join("\n"), confidence);
+      if (gateResult.action === "skip") {
+        return sendToolResult(id, `Write-gate rejected: ${gateResult.reason}`, true);
+      }
+      if (gateResult.action === "update" && gateResult.dedup_match) {
+        return sendToolResult(id,
+          `Write-gate: similar to existing atom "${gateResult.dedup_match.atom_name}" ` +
+          `(score=${gateResult.dedup_match.score}). Use mode=append on that atom instead.`, true);
+      }
+    }
+
+    const content = buildAtomContent({ title, scope, confidence, triggers, knowledge, actions, related });
+    const err = validateAtomContent(content);
+    if (err) {
+      return sendToolResult(id, `Validation failed: ${err}`, true);
+    }
+
+    // Ensure directory exists
+    fs.mkdirSync(memDir, { recursive: true });
+
+    // Write atom file (atomic)
+    const tmp = filePath + ".tmp";
+    fs.writeFileSync(tmp, content, "utf-8");
+    fs.renameSync(tmp, filePath);
+
+    // Update MEMORY.md index
+    appendToIndex(memDir, slug, relPath, triggers);
+
+    // Trigger vector reindex
+    triggerVectorReindex();
+
+    return sendToolResult(id,
+      `Created atom: ${slug}.md (${confidence})\n` +
+      `Path: ${filePath}\n` +
+      `Triggers: ${triggers.join(", ")}\n` +
+      `MEMORY.md index updated.`
+    );
+  }
+
+  // ── Mode: append ──
+  if (mode === "append") {
+    if (!fs.existsSync(filePath)) {
+      return sendToolResult(id, `Atom not found: ${slug}.md — use mode=create first`, true);
+    }
+
+    let existing = fs.readFileSync(filePath, "utf-8");
+    // Strip UTF-8 BOM if present
+    if (existing.charCodeAt(0) === 0xFEFF) existing = existing.slice(1);
+
+    // Insert new knowledge lines before ## 行動
+    const actionIdx = existing.indexOf("## 行動");
+    if (actionIdx < 0) {
+      return sendToolResult(id, `Atom ${slug}.md has no ## 行動 section — cannot append`, true);
+    }
+
+    const newLines = knowledge.map(k => k.startsWith("- ") ? k : `- ${k}`).join("\n");
+    const before = existing.slice(0, actionIdx).trimEnd();
+    const after = existing.slice(actionIdx);
+    const updated = before + "\n" + newLines + "\n\n" + after;
+
+    // Update Last-used
+    const finalContent = updated.replace(
+      /^- Last-used:\s*.+$/m,
+      `- Last-used: ${new Date().toISOString().slice(0, 10)}`
+    );
+
+    const err = validateAtomContent(finalContent);
+    if (err) {
+      return sendToolResult(id, `Validation failed after append: ${err}`, true);
+    }
+
+    const tmp = filePath + ".tmp";
+    fs.writeFileSync(tmp, finalContent, "utf-8");
+    fs.renameSync(tmp, filePath);
+
+    triggerVectorReindex();
+
+    return sendToolResult(id,
+      `Appended ${knowledge.length} knowledge lines to ${slug}.md\n` +
+      `Last-used updated.`
+    );
+  }
+
+  // ── Mode: replace ──
+  if (mode === "replace") {
+    const content = buildAtomContent({ title, scope, confidence, triggers, knowledge, actions, related });
+    const err = validateAtomContent(content);
+    if (err) {
+      return sendToolResult(id, `Validation failed: ${err}`, true);
+    }
+
+    // Preserve Confirmations from existing file
+    let confirmations = 0;
+    if (fs.existsSync(filePath)) {
+      try {
+        const old = fs.readFileSync(filePath, "utf-8");
+        const meta = parseAtomMeta(old);
+        confirmations = meta.confirmations || 0;
+      } catch {}
+    }
+
+    const finalContent = content.replace(
+      /^- Confirmations:\s*\d+$/m,
+      `- Confirmations: ${confirmations}`
+    );
+
+    fs.mkdirSync(memDir, { recursive: true });
+    const tmp = filePath + ".tmp";
+    fs.writeFileSync(tmp, finalContent, "utf-8");
+    fs.renameSync(tmp, filePath);
+
+    appendToIndex(memDir, slug, relPath, triggers);
+    triggerVectorReindex();
+
+    return sendToolResult(id,
+      `Replaced atom: ${slug}.md (${confidence}, preserved confirmations=${confirmations})\n` +
+      `MEMORY.md index updated.`
+    );
+  }
+
+  return sendToolResult(id, `Unknown mode: ${mode}. Use create/append/replace.`, true);
+}
+
+// ─── Atom Promote Handler ──────────────────────────────────────────────────
+
+function toolAtomPromote(id, args) {
+  const { atom_name, scope, project_cwd, execute } = args;
+
+  const memDir = resolveMemDir(scope, project_cwd);
+  const filePath = path.join(memDir, atom_name + ".md");
+
+  if (!fs.existsSync(filePath)) {
+    return sendToolResult(id, `Atom not found: ${atom_name}.md in ${scope} scope`, true);
+  }
+
+  let content = fs.readFileSync(filePath, "utf-8");
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+
+  const meta = parseAtomMeta(content);
+  if (!meta.confidence) {
+    return sendToolResult(id, `Cannot parse confidence from ${atom_name}.md`, true);
+  }
+
+  // Determine promotion path
+  const THRESHOLDS = {
+    "[臨]": { next: "[觀]", required: 20 },
+    "[觀]": { next: "[固]", required: 40 },
+    "[固]": null, // already max
+  };
+
+  const path_info = THRESHOLDS[meta.confidence];
+  if (!path_info) {
+    return sendToolResult(id,
+      `${atom_name} is already at ${meta.confidence} — no promotion available.`
+    );
+  }
+
+  const { next, required } = path_info;
+  const confirmations = meta.confirmations || 0;
+
+  if (confirmations < required) {
+    return sendToolResult(id,
+      `## Dry-run: ${atom_name}\n` +
+      `Current: ${meta.confidence} (${confirmations} confirmations)\n` +
+      `Required: ${required} confirmations for → ${next}\n` +
+      `Deficit: ${required - confirmations} more confirmations needed.`
+    );
+  }
+
+  // Eligible for promotion
+  if (!execute) {
+    return sendToolResult(id,
+      `## Dry-run: ${atom_name}\n` +
+      `Current: ${meta.confidence} (${confirmations} confirmations)\n` +
+      `Eligible for promotion → ${next}\n` +
+      `Set execute=true to apply.`
+    );
+  }
+
+  // Execute promotion
+  const updated = content
+    .replace(/^- Confidence:\s*.+$/m, `- Confidence: ${next}`)
+    .replace(/^- Last-used:\s*.+$/m, `- Last-used: ${new Date().toISOString().slice(0, 10)}`);
+
+  // Also update individual knowledge lines: [臨] → [觀] etc.
+  const finalContent = updated.replace(
+    new RegExp(`- \\${meta.confidence.replace(/[[\]]/g, "\\$&")}`, "g"),
+    `- ${next}`
+  );
+
+  const tmp = filePath + ".tmp";
+  fs.writeFileSync(tmp, finalContent, "utf-8");
+  fs.renameSync(tmp, filePath);
+
+  triggerVectorReindex();
+
+  return sendToolResult(id,
+    `Promoted ${atom_name}: ${meta.confidence} → ${next}\n` +
+    `Confirmations: ${confirmations}\n` +
+    `Knowledge lines updated to ${next}.`
+  );
 }
 
 function sendToolResult(id, text, isError = false) {
