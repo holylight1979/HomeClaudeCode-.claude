@@ -127,6 +127,13 @@ def write_state(session_id: str, state: Dict[str, Any]) -> None:
     provides crash safety.
     """
     WORKFLOW_DIR.mkdir(parents=True, exist_ok=True)
+
+    # V2.22: Use canonical session ID from state object — when _ensure_state
+    # returns a sibling's state, writes go to the sibling's file, not the ghost's.
+    canonical_id = state.get("session", {}).get("id")
+    if canonical_id and canonical_id != session_id:
+        session_id = canonical_id
+
     state["last_updated"] = _now_iso()
     path = state_path(session_id)
     tmp_path = path.with_suffix(".tmp")
@@ -268,7 +275,22 @@ def _ensure_state(
             if target:
                 return target
         return state
+
     cwd = input_data.get("cwd", "")
+
+    # V2.22: Before creating fallback, check if same cwd already has a working
+    # session. If found, return it directly — write_state's canonical ID redirect
+    # ensures all writes go to the real session's file (no ghost file created).
+    sibling = _find_active_sibling_state(cwd, session_id, window_seconds=86400)
+    if sibling:
+        real_id = sibling.get("session", {}).get("id", "")
+        _atom_debug_log(
+            "Fallback→Sibling",
+            f"{session_id[:12]}… → existing {real_id[:12] if real_id else '?'}…",
+            config,
+        )
+        return sibling
+
     state = new_state(session_id, cwd, "fallback")
     state["phase"] = "working"
     write_state(session_id, state)
