@@ -138,6 +138,8 @@
       }
     }
   },
+  "effortLevel": "max",
   "autoUpdatesChannel": "latest",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "model": "opus"
 }

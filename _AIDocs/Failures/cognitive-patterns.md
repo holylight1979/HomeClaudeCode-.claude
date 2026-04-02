@@ -4,9 +4,9 @@
 - Confidence: [固]
 - Type: procedural
 - Trigger: 過度工程, 代理指標, proxy metric, AI看不懂, AI在打轉, 品質回饋
-- Last-used: 2026-03-23
+- Last-used: 2026-04-01
 - Created: 2026-03-13
-- Confirmations: 38
+- Confirmations: 40
 - Tags: failure, cognitive, quality
 - Related: decisions, _INDEX
 

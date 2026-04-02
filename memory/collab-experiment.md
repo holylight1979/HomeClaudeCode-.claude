@@ -20,24 +20,27 @@
 - [觀] 中斷接回：每個目標 Design 完成後存 `_staging/next-phase.md`，新 session 讀此檔接續
 - [觀] Context 自管：使用率 >70% 時完成當前目標 → commit → 提醒 PM 開新 session
 
-## Sprint 3 已完成（2026-04-02）
+## Sprint 3 全部完成（2026-04-02）
 
 - ✅ B1+B2：session:end 接線 + consolidate 排程（cb206c6）
 - ✅ C11+C10+C8：mention 過濾 + config 備份 + web 監控（f55c115）
 - ✅ C1：Tool 超時保護（9dbd79d）
 - ✅ C2：Session checksum（b877836）
 - ✅ C3：Turn-level metrics（52efe1a）
+- ✅ C4：Subagent dependency tracking + cascade abort（d9fb264）
+- ✅ C5：訊息中止流程 + queue 清空（bd7a2ac）
+- ✅ C7：web_fetch + web_search 工具移植（17e156e）
 
-## Sprint 3/4 剩餘 backlog
+## Phase 2 狀態
 
-- [觀] C4：Subagent dependency tracking（subagent-registry.ts 加 parentId + cascade abort）
-  - 設計規格存於 `catclaw/.claude/memory/_staging/next-phase.md`
-- [觀] C5：訊息插隊 + 中止流程（TurnQueue 優先權 + AgentLoop abort signal）
-- [觀] C7：CC 工具整個移植（範圍待 Wells 確認）
-- [觀] Phase 2 大目標：CatClaw 自治管理（自主開發能力）
+- [觀] Phase 2 大目標：CatClaw 自治管理（自主開發能力）— 基礎功能齊備
+- [觀] CatClaw 現有工具：spawn_subagent, read/write/edit/glob/grep/run_command, web_fetch, web_search, memory_recall, config-get/patch, subagents
+- [觀] 下一步方向：自治開發指揮流程（讓 CatClaw 自己能跑 Sprint）
 
 ## 行動
 
 - 收到「啟動 Sprint X 自主開發」→ 讀指南 + 讀 `_staging/next-phase.md` 確認接續狀態
 - 開工前必須先向 Wells 回報目標清單 + agent 分工計畫，不可直接動手
 - 每個目標：事前 → 事中（每 agent 完成時）→ 事後（含 commit + token 合計）
+- 測試必做：每個目標完成後在測試頻道（1484061896217858178）測試，回報測試方式
+- 自主執行時：Wells 說「做到完」→ 無需詢問，執行完整 backlog 後才彙報
