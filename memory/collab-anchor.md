@@ -4,7 +4,7 @@
 - Confidence: [固]
 - Trigger: CatClaw, 個人專案, 跑偏, 過度擴張, 焦慮, 收斂, 方向校正, 提醒, 副駕, 協作規則, 邊界, 失焦, 方向, 副駕規則
 - Last-used: 2026-04-05
-- Confirmations: 46
+- Confirmations: 50
 - Related: preferences, decisions
 
 ## 知識

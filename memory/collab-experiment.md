@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [觀]
 - Trigger: AI自主開發, AI自主, Sprint自主, 協作實驗, harness agent, subagent協作, PM角色, AI當開發, 啟動協作實驗, 協作模式
-- Last-used: 2026-04-04
-- Confirmations: 8
+- Last-used: 2026-04-05
+- Confirmations: 10
 
 ## 知識
 
@@ -19,6 +19,8 @@
 - [觀] 協作知識庫：`~/.claude/collab/`（版控於 HomeClaudeCode-.claude）
 - [觀] 中斷接回：每個目標 Design 完成後存 `_staging/next-phase.md`，新 session 讀此檔接續
 - [觀] Context 自管：使用率 >70% 時完成當前目標 → commit → 提醒 PM 開新 session
+- [觀] 壓縮續接規則（唯一允許壓縮的情境）：自主開發時若 context 接近上限，可進行壓縮，但必須產好續接 prompt（含完整狀態）並重新貼一次，避免漏訊喪失記憶。具體做法：完成當前目標 → commit → 產出 `_staging/next-phase.md` 續接檔 → 壓縮或開新 session → 讀續接檔接續
+- [觀] 每階段報告規則：每個目標/階段完成後，必須產出 md 報告檔（放 `_staging/`），回報給 PM。報告內容需完整詳細：做了什麼、為什麼做、花了多少時間、如何做、潛在問題、怎麼測試、測試結果——越詳細越好
 
 ## Sprint 3 全部完成（2026-04-02）
 
