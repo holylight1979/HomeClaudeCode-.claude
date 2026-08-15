@@ -20,11 +20,28 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-# V2.20: import wg_paths for centralized path logic
+# import wg_core for centralized path logic
 sys.path.insert(0, str(Path.home() / ".claude" / "hooks"))
+# lib.* 需 ~/.claude 在 sys.path，否則 L28 `from lib.atom_locations`
+# 直接 ModuleNotFoundError → service.py fire-and-forget spawn 秒崩 → 不寫 vector_ready.flag
+# → 6 個 consumer 全 no_flag short-circuit（語意召回/episodic/衝突偵測靜默死）
+sys.path.insert(0, str(Path.home() / ".claude"))
 from ollama_client import get_client
-from wg_paths import CLAUDE_DIR, MEMORY_DIR, discover_memory_layers
+from wg_core import CLAUDE_DIR, MEMORY_DIR, discover_memory_layers
+# V5+ Session β: Failures layer 注入 + stems filter（對拍 lib/atom_locations）
+from lib.atom_locations import (  # noqa: E402
+    FAILURES_DIR, LOCAL_ATOMS_DIR, atom_search_roots, failures_atom_stems,
+)
+# 遙測欄位（last_used / read_hits / confirmations）住 <atom>.access.json sidecar，
+# 統一經 lib.atom_access 讀取（.md frontmatter 不再攜帶這些欄位）
+from lib.atom_access import read_access  # noqa: E402
+
 COLLECTION_NAME = "atom_memory"
+
+# Layer label 用於 Failures filter 觸發判斷
+FAILURES_LAYER_LABEL = "extra:failures"
+# Local realm atoms（_AIDocs/_atoms/ 階層：Tools/MemDev/World/Continuity/...）
+LOCAL_ATOMS_LAYER_LABEL = "extra:local-atoms"
 
 # Atom 檔案排除清單
 SKIP_FILENAMES = {"MEMORY.md", "_CHANGELOG.md", "_CHANGELOG_ARCHIVE.md"}
@@ -44,69 +61,139 @@ def discover_layers(
     layer_filter: Optional[str] = None,
     include_distant: bool = False,
     additional_dirs: Optional[List[Dict[str, Any]]] = None,
-) -> List[Tuple[str, Path]]:
-    """Discover all memory layers. Returns [(layer_name, memory_dir), ...].
+) -> List[Tuple[str, Path, str]]:
+    """Discover all memory layers. Returns [(layer_name, memory_dir, kind), ...].
 
-    V2.20: Delegates to wg_paths.discover_memory_layers() for global + project layers.
-    Additional dirs handled locally (config-driven, not path-logic).
+    V4: 用 wg_paths.discover_v4_sublayers / discover_memory_layers，產生
+    global + shared:{slug} / role:{slug}:{r} / personal:{slug}:{u} 子層。
+    kind ∈ {"recursive","flat-legacy","extra"}：indexer 用來決定是否遞迴。
     """
-    # Global + project layers via wg_paths (single source of truth)
-    layers = discover_memory_layers(layer_filter)
+    from wg_core import discover_all_project_memory_dirs, discover_v4_sublayers
 
-    # Additional atom directories (from config, local logic)
+    layers: List[Tuple[str, Path, str]] = []
+
+    def _accept(label: str) -> bool:
+        if not layer_filter or layer_filter == "all":
+            return True
+        if layer_filter == label:
+            return True
+        if layer_filter == "global":
+            return label == "global"
+        if layer_filter == "shared":
+            return label.startswith("shared:")
+        if layer_filter == "role":
+            return label.startswith("role:")
+        if layer_filter == "personal":
+            return label.startswith("personal:")
+        return False
+
+    if _accept("global"):
+        # 全域 atom 根走 lib.atom_locations.atom_search_roots() 單一來源：
+        # memory/（global）+ _AIDocs/Failures/（feedback-* 等）+ _AIDocs/_atoms/
+        # （local realm 階層目錄，遞迴掃描；_atoms 本身是根、不受 `_` 前綴排除規則影響）
+        for root in atom_search_roots():
+            if root == MEMORY_DIR:
+                layers.append(("global", MEMORY_DIR, "recursive"))
+            elif root == FAILURES_DIR:
+                if FAILURES_DIR.is_dir():
+                    layers.append((FAILURES_LAYER_LABEL, FAILURES_DIR, "recursive"))
+            elif root == LOCAL_ATOMS_DIR:
+                if LOCAL_ATOMS_DIR.is_dir():
+                    layers.append((LOCAL_ATOMS_LAYER_LABEL, LOCAL_ATOMS_DIR, "recursive"))
+            elif root.is_dir():
+                # atom_search_roots 未來新增根時仍進索引（label 依目錄名生成）
+                layers.append((f"extra:{root.name.strip('_').lower()}", root, "recursive"))
+
+    for slug, mem_dir in discover_all_project_memory_dirs():
+        for label, path, kind in discover_v4_sublayers(slug, mem_dir):
+            if _accept(label):
+                layers.append((label, path, kind))
+
+    # Additional atom directories (config-driven)
     if additional_dirs:
         for entry in additional_dirs:
             name = entry.get("name", "extra")
             dir_path = Path(entry.get("path", ""))
             if dir_path.is_dir():
-                if not layer_filter or layer_filter in ("all", name):
-                    layers.append((f"extra:{name}", dir_path))
+                label = f"extra:{name}"
+                if not layer_filter or layer_filter in ("all", name, label):
+                    layers.append((label, dir_path, "extra"))
 
     return layers
 
 
 def discover_atoms(
-    layers: List[Tuple[str, Path]],
+    layers: List[Tuple[str, Path, str]],
     include_distant: bool = False,
     additional_dirs: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Tuple[str, Path, str]]:
-    """Find all atom .md files. Returns [(layer_name, file_path, rel_path), ...]."""
+    """Find all atom .md files. Returns [(layer_name, file_path, rel_path), ...].
+
+    Layer 三元組 kind 控制掃描行為：
+      - "flat-legacy"：只掃 mem_dir 直下 .md，不進子目錄
+      - "recursive" / "extra"：遞迴 **/*.md（仍跳 _-prefixed 目錄）
+    """
     atoms: List[Tuple[str, Path, str]] = []
 
-    # Build per-layer skip_files from additional_dirs config
     extra_skip: Dict[str, set] = {}
     if additional_dirs:
         for entry in additional_dirs:
             name = f"extra:{entry.get('name', 'extra')}"
             extra_skip[name] = set(entry.get("skip_files", []))
 
-    for layer_name, mem_dir in layers:
+    # Backward compat：若呼叫者傳的是 2-tuple list，補上 "recursive" kind
+    norm_layers: List[Tuple[str, Path, str]] = []
+    for item in layers:
+        if len(item) == 2:
+            norm_layers.append((item[0], item[1], "recursive"))
+        else:
+            norm_layers.append(item)
+
+    # V5+: Failures layer 用 _atom_index.json stems 過濾參考文件
+    failures_stems_cache: Optional[set] = None
+
+    for layer_name, mem_dir, kind in norm_layers:
         layer_skip_files = extra_skip.get(layer_name, set())
         is_extra = layer_name.startswith("extra:")
+        is_failures = (layer_name == FAILURES_LAYER_LABEL)
+        if is_failures and failures_stems_cache is None:
+            failures_stems_cache = failures_atom_stems()
 
-        # Recursive scanning for all layers; skip files in _-prefixed directories
-        glob_patterns = ["**/*.md"]
-        seen_paths: set = set()
-        for glob_pattern in glob_patterns:
-            for md_file in sorted(mem_dir.glob(glob_pattern)):
-                if md_file in seen_paths:
-                    continue
-                seen_paths.add(md_file)
-                # Skip files inside any _-prefixed directory (e.g. _distant, _vectordb)
-                rel_parts = md_file.relative_to(mem_dir).parts
-                if any(part.startswith("_") for part in rel_parts[:-1]):
-                    continue
+        if kind == "flat-legacy":
+            # 只掃直下 .md，避免重複索引 shared/roles/personal 子目錄
+            iter_files = sorted(p for p in mem_dir.iterdir() if p.is_file() and p.suffix == ".md")
+            for md_file in iter_files:
                 if md_file.name in SKIP_FILENAMES:
                     continue
                 if any(md_file.name.startswith(p) for p in SKIP_PREFIXES):
                     continue
-                # Per-source skip_files (match stem)
                 if md_file.stem in layer_skip_files:
                     continue
                 rel = str(md_file.relative_to(mem_dir))
                 atoms.append((layer_name, md_file, rel))
+            continue
 
-        # _distant/ 遙遠記憶 (standard layers only)
+        # recursive / extra
+        seen_paths: set = set()
+        for md_file in sorted(mem_dir.glob("**/*.md")):
+            if md_file in seen_paths:
+                continue
+            seen_paths.add(md_file)
+            rel_parts = md_file.relative_to(mem_dir).parts
+            if any(part.startswith("_") for part in rel_parts[:-1]):
+                continue
+            if md_file.name in SKIP_FILENAMES:
+                continue
+            if any(md_file.name.startswith(p) for p in SKIP_PREFIXES):
+                continue
+            if md_file.stem in layer_skip_files:
+                continue
+            # V5+ Failures: 僅索引 _atom_index.json 認可的 atom stems
+            if is_failures and md_file.stem not in (failures_stems_cache or set()):
+                continue
+            rel = str(md_file.relative_to(mem_dir))
+            atoms.append((layer_name, md_file, rel))
+
         if include_distant and not is_extra:
             distant_dir = mem_dir / "_distant"
             if distant_dir.is_dir():
@@ -120,6 +207,28 @@ def discover_atoms(
 
 
 # ─── Atom Parsing & Chunking ────────────────────────────────────────────────
+
+
+def _default_scope_from_layer(layer: str) -> str:
+    """舊 atom 無 Scope metadata 時，依所在 layer 推回預設 scope（SPEC §10）。
+
+    - global      → "global"
+    - shared:*    → "shared"
+    - role:*:{r}  → "role:{r}"
+    - personal:*:{u} → "personal:{u}"
+    其他（extra:* 等）→ ""
+    """
+    if layer == "global":
+        return "global"
+    if layer.startswith("shared:"):
+        return "shared"
+    if layer.startswith("role:"):
+        parts = layer.split(":")
+        return f"role:{parts[-1]}" if len(parts) >= 3 else "shared"
+    if layer.startswith("personal:"):
+        parts = layer.split(":")
+        return f"personal:{parts[-1]}" if len(parts) >= 3 else ""
+    return ""
 
 
 def file_hash(path: Path) -> str:
@@ -154,10 +263,11 @@ def parse_and_chunk(
     atom_name = file_path.stem
     title = ""
     confidence = ""
-    last_used = ""
-    confirmations = 0
     atom_type = "semantic"
     tags_str = ""
+    scope_meta = ""      # V4: "shared" | "role:{r}" | "personal:{u}" | "global"
+    audience_meta = ""   # V4: 逗號分隔 role 列表
+    author_meta = ""     # V4: 寫入者 user
     for line in lines:
         if line.startswith("# ") and not line.startswith("## "):
             title = line[2:].strip()
@@ -168,16 +278,24 @@ def parse_and_chunk(
                 # Extract [固]/[觀]/[臨]
                 cm = re.search(r"\[(固|觀|臨)\]", val)
                 confidence = f"[{cm.group(1)}]" if cm else val
-            elif key == "Last-used":
-                last_used = val
-            elif key == "Confirmations":
-                cm2 = re.search(r"\d+", val)
-                confirmations = int(cm2.group()) if cm2 else 0
             elif key == "Type":
                 if val in ("semantic", "episodic", "procedural"):
                     atom_type = val
             elif key == "Tags":
                 tags_str = val
+            elif key == "Scope":
+                scope_meta = val
+            elif key == "Audience":
+                audience_meta = val
+            elif key == "Author":
+                author_meta = val
+
+    # 遙測欄位活訊號：讀 <atom>.access.json sidecar（lib.atom_access.read_access，
+    # 缺檔/損毀回 defaults 不拋）。searcher 的 recency / confirm_score 排序因子靠這些值。
+    access = read_access(file_path)
+    last_used = str(access.get("last_used") or "")
+    confirmations = int(access.get("confirmations") or 0)
+    readhits = int(access.get("read_hits") or 0)
 
     fhash = file_hash(file_path)
     chunks: List[Dict[str, Any]] = []
@@ -212,8 +330,12 @@ def parse_and_chunk(
                     "line_number": current_bullet_start,
                     "last_used": last_used,
                     "confirmations": confirmations,
+                    "readhits": readhits,
                     "atom_type": atom_type,
                     "tags": tags_str,
+                    "scope": scope_meta,
+                    "audience": audience_meta,
+                    "author": author_meta,
                 })
             current_bullet_lines = []
 
@@ -391,6 +513,28 @@ def create_embedder(config: Dict[str, Any]) -> Any:
     raise RuntimeError("No embedding backend available. Install Ollama or sentence-transformers.")
 
 
+# ─── Embed Input（contextual prefix）─────────────────────────────────────────
+
+
+def _embed_input(record: Dict[str, Any]) -> str:
+    """Embed 輸入 = 一行脈絡前綴 + chunk 原文（contextual retrieval 廉價版，免 LLM）。
+
+    前綴「{atom 標題} — {所屬層/domain}」直接由 frontmatter 標題與 layer/路徑組成，
+    讓短 chunk 帶上出處語意、提升檢索命中。**只影響 embedding 輸入**；
+    存進 DB 的 text 欄位維持原文不變。
+    """
+    title = record.get("title") or record.get("atom_name", "")
+    layer = record.get("layer", "")
+    if layer == LOCAL_ATOMS_LAYER_LABEL:
+        # local realm：file_path 相對 _AIDocs/_atoms/，父目錄鏈即 domain 階層（如 Tools、MemDev/x）
+        domain = str(Path(record.get("file_path", "")).parent).replace("\\", "/")
+        if domain and domain != ".":
+            layer = f"local:{domain}"
+    ctx = f"{title} — {layer}".strip(" —")
+    text = record.get("text", "")
+    return f"{ctx}\n{text}" if ctx else text
+
+
 # ─── LanceDB Operations ──────────────────────────────────────────────────────
 
 
@@ -477,6 +621,8 @@ def build_index(
             print(f"  {atom_key}: {len(chunks)} chunks")
 
         for ci, chunk in enumerate(chunks):
+            # V4: 舊 atom 缺 Scope → 依所在 layer 推預設（SPEC §10）
+            chunk_scope = chunk.get("scope", "") or _default_scope_from_layer(chunk["layer"])
             records.append({
                 "chunk_id": f"{layer_name}:{atom_name}:chunk_{ci}",
                 "text": chunk["text"],
@@ -490,14 +636,18 @@ def build_index(
                 "line_number": chunk["line_number"],
                 "last_used": chunk.get("last_used", ""),
                 "confirmations": chunk.get("confirmations", 0),
+                "readhits": chunk.get("readhits", 0),
                 "atom_type": chunk.get("atom_type", "semantic"),
                 "tags": chunk.get("tags", ""),
+                "scope": chunk_scope,
+                "audience": chunk.get("audience", ""),
+                "author": chunk.get("author", "") or "unknown",
             })
             total_chunks += 1
 
-    # Embed all texts
+    # Embed all texts（輸入帶 contextual prefix；DB text 欄位仍存原文）
     if records:
-        texts = [r["text"] for r in records]
+        texts = [_embed_input(r) for r in records]
         if verbose:
             print(f"[indexer] Embedding {len(texts)} chunks...")
         batch_size = 16
@@ -546,6 +696,19 @@ def build_index(
         # No records and full rebuild → create empty-ish table or skip
         pass
 
+    # 增量索引順帶清 stale：discover 已產出全量 atom 清單，據此把已刪/改名 atom 的
+    # 殘留 chunk 一併移除（單次 2 欄位掃描，成本輕）。layer_filter 限定時跳過，
+    # 避免把未掃描的層誤判 stale 而整層誤刪。
+    stale_stats: Optional[Dict[str, Any]] = None
+    if incremental and layer_filter in (None, "all"):
+        try:
+            table = db.open_table(TABLE_NAME)
+            current_keys = {f"{ln}:{fp.stem}" for ln, fp, _rp in atoms}
+            stale_stats = _delete_stale_keys(table, current_keys, verbose=verbose)
+        except Exception as e:
+            # fail-open 但浮訊號（可觀測性鐵律：降級不阻斷但要告知）
+            print(f"[indexer] incremental stale cleanup skipped: {e}", file=sys.stderr)
+
     elapsed = time.time() - t0
     stats = {
         "atoms_found": len(atoms),
@@ -557,10 +720,87 @@ def build_index(
         "incremental": incremental,
         "embedder": embedder.__class__.__name__,
     }
+    if stale_stats is not None:
+        stats["stale_cleanup"] = stale_stats
 
     if verbose:
         print(f"[indexer] Done: {total_chunks} chunks from {len(atoms) - skipped} atoms in {elapsed:.1f}s")
 
+    return stats
+
+
+def _delete_stale_keys(
+    table,
+    current_keys: set,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """刪掉 table 中 (layer:atom_name) 不在 current_keys 的殘留 chunk。
+
+    cleanup_stale_chunks（CLI 全清）與 build_index 增量順帶清理共用的核心。
+    """
+    total = table.count_rows()
+    rows = table.search().select(["layer", "atom_name"]).limit(total).to_list()
+
+    db_keys: Dict[str, int] = {}
+    for r in rows:
+        k = f"{r.get('layer', '')}:{r.get('atom_name', '')}"
+        db_keys[k] = db_keys.get(k, 0) + 1
+
+    stale = [k for k in db_keys if k not in current_keys]
+    deleted_chunks = 0
+    for k in stale:
+        layer_val, atom_val = k.split(":", 1)
+        layer_val = layer_val.replace("'", "''")
+        atom_val = atom_val.replace("'", "''")
+        try:
+            table.delete(f"layer = '{layer_val}' AND atom_name = '{atom_val}'")
+            deleted_chunks += db_keys[k]
+            if verbose:
+                print(f"  cleanup: removed {k} ({db_keys[k]} chunks)")
+        except Exception as e:
+            if verbose:
+                print(f"  cleanup: failed {k}: {e}")
+
+    return {
+        "db_atoms_before": len(db_keys),
+        "deleted_atoms": len(stale),
+        "deleted_chunks": deleted_chunks,
+    }
+
+
+def cleanup_stale_chunks(
+    config: Dict[str, Any],
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """Delete chunks for atoms that no longer exist on disk.
+
+    Iterates DB rows, builds set of orphan (layer, atom_name) tuples
+    by comparing against current discover_atoms() result. Deletes those rows.
+    """
+    additional_dirs = config.get("additional_atom_dirs", [])
+    layers = discover_layers(
+        layer_filter=None,
+        include_distant=config.get("index_distant", False),
+        additional_dirs=additional_dirs,
+    )
+    current = discover_atoms(
+        layers,
+        include_distant=config.get("index_distant", False),
+        additional_dirs=additional_dirs,
+    )
+    current_keys = {f"{ln}:{fp.stem}" for ln, fp, _rp in current}
+
+    try:
+        db = _get_db()
+        table = db.open_table(TABLE_NAME)
+    except Exception as e:
+        return {"error": str(e), "deleted_atoms": 0, "deleted_chunks": 0}
+
+    stats = _delete_stale_keys(table, current_keys, verbose=verbose)
+    stats["current_atoms"] = len(current_keys)
+    if verbose:
+        print(f"[cleanup] stale={stats['deleted_atoms']} atoms, "
+              f"{stats['deleted_chunks']} chunks removed")
     return stats
 
 
@@ -593,18 +833,34 @@ def search_vectors(
     query_vec: List[float],
     top_k: int = 10,
     layer_filter: Optional[str] = None,
+    layer_clause: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Search LanceDB table by vector. Returns list of dicts with _distance."""
+    """Search LanceDB table by vector. Returns list of dicts with _distance.
+
+    `layer_clause`（V4）優先於 `layer_filter`：呼叫者已組好 SQL 字串（例如
+    role filter combo）就直接傳，搜尋端不再二次解析。
+    """
     try:
         db = _get_db()
         table = db.open_table(TABLE_NAME)
         q = table.search(query_vec).limit(top_k).metric("cosine")
-        if layer_filter and layer_filter not in ("all", None):
-            # Sanitize: escape single quotes to prevent query breakage
+
+        if layer_clause:
+            q = q.where(layer_clause)
+        elif layer_filter and layer_filter not in ("all", None):
             safe_filter = layer_filter.replace("'", "''")
             if layer_filter == "global":
                 q = q.where("layer = 'global'")
             elif layer_filter.startswith("project:"):
+                # Legacy V3 label；V4 已淘汰但保留讀相容（index 中若仍有殘餘）
+                q = q.where(f"layer = '{safe_filter}'")
+            elif layer_filter == "shared":
+                q = q.where("layer LIKE 'shared:%'")
+            elif layer_filter == "role":
+                q = q.where("layer LIKE 'role:%'")
+            elif layer_filter == "personal":
+                q = q.where("layer LIKE 'personal:%'")
+            elif layer_filter.startswith("shared:") or layer_filter.startswith("role:") or layer_filter.startswith("personal:"):
                 q = q.where(f"layer = '{safe_filter}'")
         results = q.to_list()
         return results
@@ -613,7 +869,19 @@ def search_vectors(
 
 
 if __name__ == "__main__":
+    import argparse
     from config import load_config
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--incremental", action="store_true")
+    ap.add_argument("--cleanup-stale", action="store_true",
+                    help="delete chunks for atoms no longer on disk")
+    ap.add_argument("--verbose", action="store_true", default=True)
+    args = ap.parse_args()
+
     cfg = load_config()
-    stats = build_index(cfg, incremental=False, verbose=True)
+    if args.cleanup_stale:
+        stats = cleanup_stale_chunks(cfg, verbose=args.verbose)
+    else:
+        stats = build_index(cfg, incremental=args.incremental, verbose=args.verbose)
     print(json.dumps(stats, indent=2, ensure_ascii=False))

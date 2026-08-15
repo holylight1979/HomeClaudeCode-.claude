@@ -17,17 +17,62 @@ projects/
 session-env/
 shell-snapshots/
 statsig/
+tasks/
 telemetry/
 todos/
 
 # ─── Runtime cache files ─────────────────────────────────
 stats-cache.json
+.last-cleanup
 
 # ─── Workflow Guardian runtime state ─────────────────────
 # config.json IS tracked; state files are not
 workflow/state-*.json
+workflow/state-*.json.bak-*
+workflow/state-*.json.corrupt
+workflow/coord-warn-cache-*.json
+workflow/world-dev.json
+workflow/_*.log
 workflow/guardian-crash.log
 workflow/extract-worker.log
+workflow/hot_cache.json
+workflow/vector_ready.flag
+workflow/vector_rekick.marker
+workflow/vector_starting.lock
+workflow/.backend_long_die.json
+workflow/_merge_history.log
+workflow/last_review_marker.json
+workflow/realm_automove_pending.json
+workflow/mcp-version-cache.json
+workflow/aec-report/
+workflow/aec-decision/
+workflow/ups-sentinel/
+workflow/pan-pass/
+workflow/pan-deny/
+workflow/acceptance-spec/
+workflow/acceptance-audit.jsonl*
+workflow/acceptance-backtest.jsonl*
+workflow/outcome_stats.jsonl
+workflow/outcome-unknown-advisory.json
+workflow/health-reports/
+workflow/health-last-run.json
+workflow/dpm-done/
+
+# ─── Per-user / per-machine state (Wave 5 untracked) ─────
+memory/project-registry.json
+memory/wisdom/reflection_metrics.json
+memory/wisdom/causal_graph.json
+memory/_meta/atom_io_audit.jsonl
+memory/_promotion_audit.jsonl
+policy-limits.json
+
+# ─── Codex Companion runtime state ────────────────────────
+workflow/companion-state-*.json
+workflow/companion-state-*.tmp
+workflow/companion-assessment-*.json
+workflow/companion-metrics-*.json
+workflow/companion-backend.json
+workflow/companion.pid
 
 # ─── Runtime logs (atom-debug, hook output) ───────────────
 Logs/
@@ -39,11 +84,22 @@ memory/_vectordb/service.pid
 memory/_vectordb/service.log
 
 # ─── ACT-R access logs (runtime, auto-generated) ──────────
+# 政策：所有 atom 遙測 sidecar（read_hits/confirmations/usefulness）一律不進版控——
+# per-machine 執行期資料，提交會 churn + 跨機衝突。下方 blanket 收斂全部位置
+# （含 _AIDocs/_atoms/ local realm、_AIDocs/Tools/；2026-06 補 S1/S2 realm 遷移破口）。
+**/*.access.json
 memory/*.access.json
+memory/**/*.access.json
 **/memory/*.access.json
+**/memory/**/*.access.json
+_AIDocs/Failures/*.access.json
 
 # ─── Staging area (temp files, session prompts) ──────────
 memory/_staging/
+
+# ─── Auto-capture drafts (隔離區，未確認 [臨]，不入版控/索引/注入) ─────────
+memory/_drafts/
+**/memory/shared/_drafts/
 
 # ─── Episodic atoms (TTL 24d, auto-generated) ─────────────
 memory/episodic/
@@ -52,13 +108,15 @@ memory/episodic/
 memory/_distant/
 
 # ─── User-specific config (per-user, auto-generated) ──────
+# IDENTITY.md / USER.md 為個人實例（從 IDENTITY.template / USER.template 拷出）；模板 tracked, 實例 ignored
 USER.md
 USER-*.md
+!prompts/user-decision-*.md
 IDENTITY.md
 IDENTITY-*.md
 
 # ─── User-specific atoms (hardware, local env) ────────────
-memory/hardware.md
+# memory/hardware.md  ← 家用機本 repo 即為此機備份，改為追蹤（2026-08-15）
 
 # ─── Session transcripts (huge, not needed in repo) ───────
 projects/*/*.jsonl
@@ -79,6 +137,7 @@ memory/_vectordb/eval-results-*.json
 
 # ─── Dashboard screenshots (local artifacts) ────────────
 dashboard-*.png
+world-*.png
 
 # ─── Python cache ────────────────────────────────────────
 __pycache__/
@@ -90,11 +149,7 @@ Thumbs.db
 *.swp
 *~
 memory/mail-sorting.md
-memory/_vectordb/reindex.log
-
-# ─── Session process state (runtime, per-machine) ─────────
 sessions/
-.last-cleanup
 
-# ─── ACT-R access logs in nested memory dirs ──────────────
-memory/**/*.access.json
+# ─── 本機補充（家用機）─────────────────────────────────────
+memory/_vectordb/reindex.log

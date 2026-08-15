@@ -2,10 +2,11 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: ICLD, 閉環, Sprint, 功能拆解, 開發計畫, 大型新功能, 新系統規劃, 規格書
-- Last-used: 2026-03-25
-- Confirmations: 58
-- Related: workflow-rules, icld-sprint-template
+- Type: procedural
+- Trigger: ICLD, Sprint, 閉環, 功能拆解
+- Created: 2026-03-19
+- Tags: workflow, icld, sprint
+- Related: workflow-rules, icld-sprint-template, goal-driven-verify-loopkarpathy-吸收
 
 ## 知識
 
@@ -46,9 +47,3 @@
 - 功能需求 / 拆解請求 → 先評估規模 → 滿足 ICLD 條件則主動建議
 - 使用者拒絕 → 退回 Phase 模式（見 workflow-rules.md）
 
-## 演化日誌
-
-| 日期 | 變更 | 來源 |
-|------|------|------|
-| 2026-03-17 | 原始建立（含在 workflow-rules.md） | session:wellstseng merge |
-| 2026-03-19 | 從 workflow-rules.md 拆分為獨立 atom | atom-debug 精準化 |

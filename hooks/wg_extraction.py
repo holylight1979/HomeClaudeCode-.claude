@@ -1,21 +1,24 @@
 """
-wg_extraction.py — Per-turn 萃取管線、Worker 管理、Failure 偵測
+wg_extraction.py — 萃取 Worker spawn / Failure 偵測 / User Signal / Plan classify（V5）
 
-Transcript 讀取、per-turn 增量萃取、failure keyword 偵測、
-extract-worker subprocess 管理。
+統合：
+- failure keyword 偵測、worker spawn（原 wg_extraction）
+- L0 User Decision Detector（前 wg_user_extract.detect_signal）
+- 內容分類 plan vs knowledge（前 wg_content_classify）
 """
 
 import json
 import os
+import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
-from wg_paths import CLAUDE_DIR, cwd_to_project_slug, get_transcript_path
 from wg_core import (
+    CLAUDE_DIR, WORKFLOW_DIR,
     _now_iso, _atom_debug_log, _atom_debug_error,
-    write_state,
 )
 from wg_atoms import _kw_match
 
@@ -24,7 +27,6 @@ from wg_atoms import _kw_match
 
 
 def _is_pid_alive(pid: int) -> bool:
-    """Check if a process is still running."""
     if not pid:
         return False
     if sys.platform == "win32":
@@ -47,71 +49,44 @@ def _is_pid_alive(pid: int) -> bool:
 
 # ─── Lease-based Concurrency ────────────────────────────────────────────────
 
-_DEFAULT_LEASE_TTL = 300  # 5 minutes
+_DEFAULT_LEASE_TTL = 300
 
 
 def _is_lease_valid(state: dict, key: str) -> bool:
-    """Check if a worker lease is still valid (not expired AND PID alive).
-
-    Lease format in state: {key}: {"pid": int, "expires_at": float}
-    Handles legacy format where {key} is a bare PID int.
-    """
-    import time as _time
+    """Check if a worker lease is still valid (not expired AND PID alive)."""
     lease = state.get(key)
     if not lease:
         return False
-    # Legacy: bare PID int → treat as expired (force migration)
     if isinstance(lease, int):
         return _is_pid_alive(lease)
     pid = lease.get("pid", 0)
     expires_at = lease.get("expires_at", 0)
-    if _time.time() > expires_at:
+    if time.time() > expires_at:
         return False
     return _is_pid_alive(pid)
 
 
 def _set_lease(state: dict, key: str, pid: int, ttl: int = _DEFAULT_LEASE_TTL) -> None:
-    """Write a lease entry into state."""
-    import time as _time
-    state[key] = {"pid": pid, "expires_at": _time.time() + ttl}
-
-
-# ─── Transcript Helpers ──────────────────────────────────────────────────────
-
-
-def _find_transcript(session_id: str, cwd: str):
-    """Find session transcript JSONL file."""
-    return get_transcript_path(session_id, cwd)
-
-
-def _count_new_assistant_chars(transcript_path, byte_offset: int) -> int:
-    """Lightweight pre-scan: count assistant text chars from byte_offset."""
-    total = 0
-    try:
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            if byte_offset > 0:
-                f.seek(byte_offset)
-            for raw_line in f:
-                try:
-                    obj = json.loads(raw_line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if obj.get("type") != "assistant":
-                    continue
-                content = obj.get("message", {}).get("content", [])
-                if not isinstance(content, list):
-                    continue
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        t = block.get("text", "")
-                        if t and len(t) > 30:
-                            total += len(t)
-    except (OSError, UnicodeDecodeError):
-        pass
-    return total
+    state[key] = {"pid": pid, "expires_at": time.time() + ttl}
 
 
 # ─── Worker Spawning ─────────────────────────────────────────────────────────
+
+
+def _gui_python() -> str:
+    """回傳 GUI-subsystem pythonw（無 console 視窗）；找不到退回 sys.executable。
+
+    坑：hermes venv 的 pythonw 是 **console-subsystem**（uv venv trampoline 會 re-exec
+    成 base python.exe），spawn 出來會閃黑窗；且 `CREATE_NO_WINDOW | DETACHED_PROCESS`
+    組合在 console 子行程上不保證壓窗。故改用穩定的 uv default-shim GUI pythonw
+    （`AppData\\Local\\Python\\bin\\pythonw.exe`，路徑無版本號→ uv 升級不破）。
+    與 settings.json hook interpreter 同源；見 atom
+    windows-cc-hook-閃-console-pythonw-修-layer-1勿只補巢狀-creationflags。"""
+    if sys.platform == "win32":
+        cand = Path.home() / "AppData" / "Local" / "Python" / "bin" / "pythonw.exe"
+        if cand.exists():
+            return str(cand)
+    return sys.executable
 
 
 def _spawn_extract_worker(ctx_dict: dict) -> int:
@@ -128,13 +103,12 @@ def _spawn_extract_worker(ctx_dict: dict) -> int:
             kwargs["start_new_session"] = True
         worker_log = CLAUDE_DIR / "workflow" / "extract-worker.log"
         worker_log_fh = open(worker_log, "a", encoding="utf-8")
-        # Force UTF-8 encoding in worker subprocess (prevents cp950 errors on CJK Windows)
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         try:
             json_ctx = json.dumps(ctx_dict, ensure_ascii=False)
             proc = _sp.Popen(
-                [sys.executable, str(worker_path)],
+                [_gui_python(), str(worker_path)],
                 stdin=_sp.PIPE,
                 stdout=_sp.DEVNULL,
                 stderr=worker_log_fh,
@@ -146,82 +120,11 @@ def _spawn_extract_worker(ctx_dict: dict) -> int:
             raise
         proc.stdin.write(json_ctx.encode("utf-8"))
         proc.stdin.close()
-        # Close our copy of the log fd — child process has its own fd via inheritance.
-        # Without this, this process holds the fd open until exit.
         worker_log_fh.close()
         return proc.pid
     except Exception as e:
         _atom_debug_error("萃取:_spawn_extract_worker", e)
         return 0
-
-
-# ─── Per-turn Extraction ─────────────────────────────────────────────────────
-
-
-def _maybe_spawn_per_turn_extraction(
-    session_id: str, state: Dict[str, Any], config: Dict[str, Any]
-) -> None:
-    """Conditionally spawn per-turn incremental extraction."""
-    rc = config.get("response_capture", {})
-    pt = rc.get("per_turn", {})
-    if not pt.get("enabled", False):
-        return
-
-    # Cooldown check
-    last_at = state.get("last_per_turn_extraction_at", "")
-    if last_at:
-        cooldown = pt.get("cooldown_seconds", 120)
-        try:
-            last_t = datetime.fromisoformat(last_at)
-            if (datetime.now().astimezone() - last_t).total_seconds() < cooldown:
-                return
-        except (ValueError, TypeError):
-            pass
-
-    # Concurrency guard (lease-based)
-    if _is_lease_valid(state, "extract_worker_pid"):
-        return
-
-    # Check new content since last extraction
-    cwd = state.get("session", {}).get("cwd", "")
-    transcript = _find_transcript(session_id, cwd)
-    if not transcript:
-        return
-
-    prev_offset = state.get("extraction_offset", 0)
-    file_size = transcript.stat().st_size
-    if file_size <= prev_offset:
-        return
-
-    new_chars = _count_new_assistant_chars(transcript, prev_offset)
-    min_chars = pt.get("min_new_chars", 500)
-    if new_chars < min_chars:
-        return
-
-    # Resolve intent
-    tracker = state.get("topic_tracker", {})
-    dist = tracker.get("intent_distribution", {})
-    intent = max(dist, key=dist.get, default="build") if dist else "build"
-
-    # Spawn worker
-    worker_ctx = {
-        "session_id": session_id,
-        "cwd": cwd,
-        "config": config,
-        "knowledge_queue": state.get("knowledge_queue", []),
-        "session_intent": intent,
-        "mode": "per_turn",
-        "byte_offset": prev_offset,
-    }
-    pid = _spawn_extract_worker(worker_ctx)
-    if pid:
-        _set_lease(state, "extract_worker_pid", pid)
-        state["last_per_turn_extraction_at"] = _now_iso()
-        write_state(session_id, state)
-        print(
-            f"[v2.12] per-turn extract-worker spawned (pid={pid}, offset={prev_offset}, new_chars={new_chars})",
-            file=sys.stderr,
-        )
 
 
 # ─── Failure Detection ───────────────────────────────────────────────────────
@@ -266,7 +169,6 @@ def _maybe_spawn_failure_extraction(
         except (ValueError, TypeError):
             pass
 
-    # Concurrency guard (lease-based)
     if _is_lease_valid(state, "failure_worker_pid"):
         return
 
@@ -293,3 +195,146 @@ def _maybe_spawn_failure_extraction(
             f"Spawned failure extraction (pid={pid}), prompt: {clean_prompt[:100]}",
             config,
         )
+
+
+# ─── L0 User Decision Detector (was wg_user_extract.detect_signal) ──────────
+
+_STRONG: List[Tuple[str, float]] = [
+    ("記住", 1.0), ("永遠", 1.0), ("從此", 1.0), ("以後都要", 1.0),
+    ("禁止", 1.0), ("一律", 1.0), ("統一", 1.0), ("決定", 1.0),
+    ("規定", 1.0), ("約定", 1.0),
+    ("remember", 1.0), ("always", 1.0), ("never", 1.0),
+    ("from now on", 1.0), ("must", 1.0),
+]
+_MEDIUM: List[Tuple[str, float]] = [
+    ("改用", 0.6), ("不要再", 0.6), ("下次", 0.6), ("固定", 0.6),
+    ("偏好", 0.6), ("我要", 0.6), ("我不要", 0.6),
+    ("prefer", 0.6), ("switch to", 0.6), ("stop using", 0.6),
+]
+_NEGATIVE: List[Tuple[str, float]] = [
+    ("也許", -0.8), ("可能", -0.8), ("試試", -0.8), ("好不好", -0.8),
+    ("maybe", -0.8), ("perhaps", -0.8), ("might", -0.8),
+]
+_ALL_KEYWORDS: List[Tuple[str, float]] = _STRONG + _MEDIUM + _NEGATIVE
+
+_SYNTAX_MODAL = re.compile(
+    r"[我我們](?:以後|之後|未來)?"
+    r"(?:要|會|得|該|必須|應該|都要|一定要|不要|不再|別再)"
+    r".{2,30}",
+)
+_SYNTAX_UNIFORM = re.compile(
+    r"(?:都|一律|固定|統一|全部)"
+    r"(?:用|改|換|採用|寫|設|跑|走|使用|改成)"
+    r".{1,30}",
+)
+_SYNTAX_NEGATE = re.compile(
+    r"(?:不要|不準|不可以|禁止|別|勿|停止|不用|不再)"
+    r"(?:用|寫|加|改|跑|裝|使用|建立|產生)"
+    r".{1,30}",
+)
+_SYNTAX_PATTERNS: List[Tuple[re.Pattern, str, float]] = [
+    (_SYNTAX_MODAL, "syntax:modal", 0.5),
+    (_SYNTAX_UNIFORM, "syntax:uniform", 0.5),
+    (_SYNTAX_NEGATE, "syntax:negate", 0.5),
+]
+
+_QUESTION_END = re.compile(r"[?？]$|嗎\s*$|呢\s*$")
+_CODE_FENCE = re.compile(r"^```", re.MULTILINE)
+_CODE_INDENT = re.compile(r"^    \S", re.MULTILINE)
+
+
+def _is_mostly_code(text: str) -> bool:
+    lines = text.split("\n")
+    if not lines:
+        return False
+    fence_count = len(_CODE_FENCE.findall(text))
+    if fence_count >= 2:
+        in_fence = False
+        code_lines = 0
+        for line in lines:
+            if _CODE_FENCE.match(line):
+                in_fence = not in_fence
+                code_lines += 1
+            elif in_fence:
+                code_lines += 1
+        if code_lines / len(lines) > 0.8:
+            return True
+    indent_lines = len(_CODE_INDENT.findall(text))
+    if indent_lines / len(lines) > 0.8:
+        return True
+    return False
+
+
+def _should_skip(prompt: str) -> bool:
+    stripped = prompt.strip()
+    if len(stripped) < 8 or len(stripped) > 500:
+        return True
+    if _QUESTION_END.search(stripped):
+        return True
+    if _is_mostly_code(stripped):
+        return True
+    return False
+
+
+_SIGNAL_THRESHOLD = 0.4
+
+
+def detect_signal(prompt: str) -> Dict:
+    """Detect user decision/preference signals in prompt text.
+
+    Returns {"signal": bool, "score": float, "matched": ["keyword1", "pattern2"]}
+    """
+    if _should_skip(prompt):
+        return {"signal": False, "score": 0.0, "matched": []}
+
+    prompt_lower = prompt.lower()
+    score = 0.0
+    matched: List[str] = []
+
+    for keyword, weight in _ALL_KEYWORDS:
+        if keyword in prompt_lower:
+            score += weight
+            matched.append(keyword)
+
+    for pattern, name, weight in _SYNTAX_PATTERNS:
+        if pattern.search(prompt):
+            score += weight
+            matched.append(name)
+
+    signal = score >= _SIGNAL_THRESHOLD
+    return {"signal": signal, "score": round(score, 2), "matched": matched}
+
+
+# ─── Content Classify: plan vs knowledge (was wg_content_classify) ──────────
+
+PLAN_CONTENT_RE = re.compile(
+    r"(?i)"
+    r"(plan|todo|roadmap|draft|wip|scratch|調查|規劃|暫存)"
+    r"|phase[- _]?\d"
+    r"|設計方案|待辦|草稿|下一步|next[- _]?step|action[- _]?item"
+)
+
+PLAN_FACT_RE = re.compile(
+    r"(?i)"
+    r"(預計|計畫|規劃|打算|下一步|將要|準備|TODO|TBD|待確認|待實作|待處理)"
+    r"|(Phase\s*\d+\s*.{0,5}(預計|計畫|目標|排程))"
+    r"|(下個\s*(session|階段|sprint))"
+    r"|(尚未|還沒|未來|之後再)"
+)
+
+
+def is_plan_filename(filename: str) -> bool:
+    return bool(PLAN_CONTENT_RE.search(filename))
+
+
+def is_plan_content(text: str) -> bool:
+    if not text or len(text) < 10:
+        return False
+    return bool(PLAN_FACT_RE.search(text))
+
+
+def classify_extracted_item(item: dict) -> str:
+    content = item.get("content", "")
+    if is_plan_content(content):
+        return "plan"
+    return "knowledge"

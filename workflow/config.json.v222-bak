@@ -1,0 +1,113 @@
+{
+  "atom_debug": false,
+  "enabled": true,
+  "stop_gate_max_blocks": 2,
+  "min_files_to_block": 2,
+  "remind_after_turns": 3,
+  "max_reminders": 3,
+  "dashboard_port": 3848,
+  "sync_keywords": [
+    "同步",
+    "sync",
+    "commit",
+    "提交",
+    "結束",
+    "收工"
+  ],
+  "completion_indicators": [
+    "已同步",
+    "同步完成",
+    "已更新",
+    "已提交",
+    "committed"
+  ],
+  "vector_search": {
+    "enabled": true,
+    "service_port": 3849,
+    "embedding_backend": "ollama",
+    "embedding_model": "qwen3-embedding:0.6b",
+    "fallback_backend": "none",
+    "fallback_model": "none",
+    "ollama_base_url": "http://127.0.0.1:11434",
+    "ollama_llm_model": "qwen3:1.7b",
+    "ollama_backends": {
+      "rdchat": {
+        "base_url": "https://rdchat.uj.com.tw/ollama",
+        "auth": {
+          "type": "bearer_ldap",
+          "login_url": "https://rdchat.uj.com.tw/api/v1/auths/ldap",
+          "password_file": "~/.claude/workflow/.rdchat_password"
+        },
+        "llm_model": "qwen3.5:latest",
+        "embedding_model": "qwen3-embedding:latest",
+        "priority": 1,
+        "enabled": false,
+        "think": true,
+        "llm_num_predict": 8192
+      },
+      "local": {
+        "base_url": "http://127.0.0.1:11434",
+        "llm_model": "qwen3:1.7b",
+        "embedding_model": "qwen3-embedding:0.6b",
+        "priority": 2,
+        "think": false,
+        "llm_num_predict": 2048
+      }
+    },
+    "search_top_k": 5,
+    "search_min_score": 0.65,
+    "search_timeout_ms": 3500,
+    "auto_start_service": true,
+    "auto_index_on_change": true
+  },
+  "write_gate": {
+    "enabled": true,
+    "auto_threshold": 0.5,
+    "ask_threshold": 0.3,
+    "dedup_score": 0.8,
+    "skip_on_explicit_user": true
+  },
+  "episodic": {
+    "auto_generate": true,
+    "min_files": 1,
+    "min_duration_seconds": 120
+  },
+  "_unused_cleanup": "cleanup/session_awareness/decay 設定僅供 memory-audit.py --enforce 使用，guardian 不讀取",
+  "cross_session": {
+    "enabled": true,
+    "min_score": 0.75,
+    "promote_threshold": 2,
+    "suggest_threshold": 4,
+    "timeout_seconds": 5
+  },
+  "self_iteration": {
+    "decay_half_life_days": 30,
+    "promote_min_confirmations": 20,
+    "archive_score_threshold": 0.3,
+    "oscillation_window": 3,
+    "oscillation_threshold": 2,
+    "review_interval": 6
+  },
+  "response_capture": {
+    "enabled": true,
+    "session_end_max_chars": 20000,
+    "session_end_max_items": 5,
+    "session_end_timeout_seconds": 10,
+    "classification_default": "[臨]",
+    "per_turn": {
+      "enabled": true,
+      "min_new_chars": 500,
+      "max_items": 3,
+      "skip_cross_session": true,
+      "cooldown_seconds": 120
+    },
+    "failure_extraction": {
+      "enabled": true,
+      "cooldown_seconds": 180,
+      "max_items": 2,
+      "strong_keywords": ["又錯了", "沒修好", "還是壞", "修復失敗", "一樣的問題", "又壞了", "怎麼又", "再次失敗"],
+      "weak_keywords": ["錯了", "不對", "壞了", "失敗", "沒用", "沒效", "不行", "bug", "broken", "failed", "still broken", "same error", "為什麼還", "怎麼還", "反覆", "踩坑", "又踩", "沒生效", "白做了"],
+      "weak_min_match": 3
+    }
+  }
+}

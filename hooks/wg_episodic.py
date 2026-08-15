@@ -12,20 +12,28 @@ import sys
 import urllib.request
 import urllib.error
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from wg_paths import (
-    CLAUDE_DIR, MEMORY_DIR, EPISODIC_DIR, MEMORY_INDEX, WORKFLOW_DIR,
+from wg_core import (
+    CLAUDE_DIR, MEMORY_DIR, EPISODIC_DIR, WORKFLOW_DIR,
     cwd_to_project_slug, get_project_memory_dir,
     resolve_episodic_dir, get_transcript_path,
+    _now_iso, _atom_debug_log, _atom_debug_error,
+    sanitize_harness_noise,
 )
-from wg_core import _now_iso, _atom_debug_log, _atom_debug_error
-from wg_content_classify import is_plan_content
+from wg_extraction import is_plan_content
 
 sys.path.insert(0, str(Path.home() / ".claude" / "tools"))
 from ollama_client import get_client
+
+# route Confirmations counter update through atom_io funnel
+_LIB_PARENT = str(Path.home() / ".claude")
+if _LIB_PARENT not in sys.path:
+    sys.path.insert(0, _LIB_PARENT)
+from lib.atom_io import write_raw  # noqa: E402
+from lib.atom_access import move_atom_pair  # noqa: E402
 
 
 # ─── Episodic Gate ────────────────────────────────────────────────────────────
@@ -42,7 +50,7 @@ def _should_generate_episodic(state: Dict[str, Any], config: Dict[str, Any]) -> 
     kq_count = len(state.get("knowledge_queue", []))
     min_files = ep_cfg.get("min_files", 1)
 
-    # V2.10: Pure-read sessions (≥5 files) also warrant episodic atoms
+    # Pure-read sessions (≥5 files) also warrant episodic atoms
     if mod_count < min_files and kq_count == 0 and read_count < 5:
         return False
 
@@ -121,7 +129,7 @@ def _resolve_episodic_dir(state: Dict[str, Any]) -> Tuple[Path, str]:
     return resolve_episodic_dir(cwd)
 
 
-# ─── V2.4: Response Knowledge Capture (Ollama LLM) ──────────────────────────
+# ─── Response Knowledge Capture (Ollama LLM) ──────────────────────────
 
 
 def _find_session_transcript(session_id: str, cwd: str) -> Optional[Path]:
@@ -170,225 +178,18 @@ def _call_ollama_generate(prompt: str, model: str = None,
     """
     try:
         client = get_client()
-        # think="auto" → rdchat: think=True + 8192, local: think=False + 2048
-        # 不用 format="json" — qwen3.5 thinking mode 與 JSON constrained decoding 衝突
+        # think="auto" → rdchat(gemma4:e4b): think=True + 4096, local(qwen3:1.7b): think=False + 2048
+        # 不用 format="json" — gemma4 think=false + format 有 bug (ollama#15260)
         return client.generate(
             prompt, model=model, timeout=timeout,
-            temperature=0.1, think="auto",
+            temperature=0.0, think="auto",
         )
     except Exception as e:
         _atom_debug_error("萃取:_call_ollama_generate", e)
         return ""
 
 
-_EXTRACT_PROMPT_TEMPLATE = (
-    "你是「原子記憶系統」的知識萃取器。從 AI 回應中萃取可跨 session 重用的知識。\n"
-    "輸出 JSON array: [{{\"content\": \"精簡事實，最多150字\", "
-    "\"type\": \"factual|procedural|architectural|pitfall|decision\"}}]\n\n"
-    "只萃取：根因分析、API 行為、架構限制、除錯模式、設定值、環境特有行為。\n"
-    "不萃取：程式碼變更、通用程式知識、session 進度、問候語。\n"
-    "沒有值得萃取的內容就輸出 []。直接輸出 JSON。\n\n"
-    "回應文字:\n{text}\n\nJSON:"
-)
-
-
-def _llm_extract_knowledge(text: str, existing_queue: List[dict],
-                           source: str = "session-end") -> List[dict]:
-    """Use local LLM to extract knowledge from assistant text (SessionEnd only).
-
-    Args:
-        text: Assistant response text
-        existing_queue: Already queued knowledge items (for dedup)
-        source: extraction source label
-
-    Returns:
-        List of knowledge items: [{content, classification, knowledge_type, source, at}]
-    """
-    if not text or len(text) < 50:
-        return []
-
-    max_chars = 4000
-    max_items = 5
-
-    truncated = text[:max_chars]
-    prompt = _EXTRACT_PROMPT_TEMPLATE.format(text=truncated)
-
-    raw = _call_ollama_generate(prompt)
-    if not raw:
-        return []
-
-    # Parse JSON (with fallback)
-    items = []
-    try:
-        # Try to find JSON array in response
-        match = re.search(r"\[.*\]", raw, re.DOTALL)
-        if match:
-            items = json.loads(match.group(0))
-    except (json.JSONDecodeError, ValueError):
-        # Regex fallback: try to extract content/type pairs
-        for m in re.finditer(r'"content"\s*:\s*"([^"]{10,150})"', raw):
-            items.append({"content": m.group(1), "type": "factual"})
-
-    if not items:
-        return []
-
-    # Dedup against existing queue
-    existing_fingerprints = {
-        q.get("content", "")[:40].lower() for q in existing_queue
-    }
-
-    results = []
-    now = _now_iso()
-    for item in items[:max_items]:
-        content = item.get("content", "").strip()
-        if not content or len(content) < 10:
-            continue
-        # Skip if too similar to existing
-        if content[:40].lower() in existing_fingerprints:
-            continue
-        knowledge_type = item.get("type", "factual")
-        if knowledge_type not in ("factual", "procedural", "architectural", "pitfall", "decision"):
-            knowledge_type = "factual"
-        results.append({
-            "content": content[:150],
-            "classification": "[臨]",
-            "knowledge_type": knowledge_type,
-            "source": source,
-            "at": now,
-        })
-        existing_fingerprints.add(content[:40].lower())
-
-    return results
-
-
-# ─── V2.4 Phase 3: Cross-Session Pattern Consolidation ──────────────────────
-
-
-def _check_cross_session_patterns(
-    knowledge_items: List[dict], session_id: str, config: Dict[str, Any]
-) -> List[dict]:
-    """Check if knowledge items appeared in past sessions via vector search.
-
-    For each item, query vector service top-3 (min_score: 0.75).
-    Count distinct sessions that mention similar knowledge.
-    - 2+ sessions → auto-promote [臨] → [觀]
-    - 4+ sessions → mark suggestion to promote [觀] → [固] (not auto)
-
-    Returns list of cross-session observation dicts for episodic atom.
-    Also mutates knowledge_items in-place (classification upgrade).
-    """
-    vs_config = config.get("vector_search", {})
-    if not vs_config.get("enabled", True):
-        return []
-
-    port = vs_config.get("service_port", 3849)
-    cross_session_config = config.get("cross_session", {})
-    min_score = cross_session_config.get("min_score", 0.75)
-    promote_threshold = cross_session_config.get("promote_threshold", 2)
-    suggest_threshold = cross_session_config.get("suggest_threshold", 4)
-    timeout_s = cross_session_config.get("timeout_seconds", 5)
-
-    observations: List[dict] = []
-    current_session_prefix = session_id[:8] if session_id else ""
-
-    for item in knowledge_items:
-        content = item.get("content", "")
-        if not content or len(content) < 20:
-            continue
-
-        # Query vector search for similar knowledge
-        try:
-            import urllib.parse
-            params = urllib.parse.urlencode({
-                "q": content[:200],
-                "top_k": 5,
-                "min_score": min_score,
-            })
-            url = f"http://127.0.0.1:{port}/search/ranked?{params}"
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            try:
-                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                    results = json.loads(resp.read())
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    # Fallback to basic /search
-                    params = urllib.parse.urlencode({
-                        "q": content[:200], "top_k": 5, "min_score": min_score,
-                    })
-                    url = f"http://127.0.0.1:{port}/search?{params}"
-                    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                        results = json.loads(resp.read())
-                else:
-                    continue
-
-            # Count distinct sessions from results (episodic atoms encode session info)
-            session_hits = set()
-            for r in results:
-                atom_name = r.get("atom_name", "")
-                # Episodic atoms: "episodic-YYYYMMDD-slug" → each is a different session
-                if "episodic" in atom_name.lower():
-                    # Exclude current session's atom (prefix match)
-                    if current_session_prefix and current_session_prefix in atom_name:
-                        continue
-                    session_hits.add(atom_name)
-                else:
-                    # Non-episodic atoms: check if they contain session references
-                    atom_text = r.get("text", r.get("content", ""))
-                    if atom_text:
-                        session_hits.add(f"atom:{atom_name}")
-
-            hit_count = len(session_hits)
-            if hit_count < promote_threshold:
-                continue
-
-            # V2.11: No auto-promote — Confirmations +1 only, hint at 4+
-            current_class = item.get("classification", "[臨]")
-            action = ""
-
-            if hit_count >= suggest_threshold:
-                action = f"建議晉升（{hit_count} sessions 命中，需使用者確認）"
-            else:
-                action = f"跨 session 命中 {hit_count} 次（Confirmations +1）"
-
-            # Increment Confirmations in matched atom files
-            for r in results:
-                atom_file = r.get("file_path", "")
-                if atom_file and os.path.isfile(atom_file):
-                    try:
-                        atom_text = Path(atom_file).read_text(encoding="utf-8-sig")
-                        cm = re.search(r"^(- Confirmations:\s*)(\d+)", atom_text, re.MULTILINE)
-                        if cm:
-                            new_c = int(cm.group(2)) + 1
-                            atom_text = re.sub(
-                                r"^(- Confirmations:\s*)\d+", rf"\g<1>{new_c}",
-                                atom_text, count=1, flags=re.MULTILINE,
-                            )
-                            Path(atom_file).write_text(atom_text, encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        pass
-
-            observations.append({
-                "content": content[:80],
-                "classification": current_class,
-                "sessions_hit": hit_count,
-                "action": action,
-                "matched_atoms": list(session_hits)[:5],
-            })
-
-            print(
-                f"[v2.11] Cross-session: \"{content[:40]}...\" → {action}",
-                file=sys.stderr,
-            )
-
-        except Exception as e:
-            print(f"[v2.4] Cross-session check error: {e}", file=sys.stderr)
-            continue
-
-    return observations
-
-
-# ─── V2.11: Conflict Detection ───────────────────────────────────────────────
+# ─── Conflict Detection ───────────────────────────────────────────────
 
 
 def _detect_atom_conflicts(
@@ -466,7 +267,7 @@ def _detect_atom_conflicts(
                 })
 
         except Exception as e:
-            print(f"[v2.11] Conflict detection error: {e}", file=sys.stderr)
+            print(f"Conflict detection error: {e}", file=sys.stderr)
             continue
 
     return conflicts
@@ -481,7 +282,8 @@ def _build_episodic_summary(state: Dict[str, Any]) -> Dict[str, Any]:
     area_counts: Counter = Counter()
     for m in modified:
         area = _extract_area(m.get("path", ""))
-        area_counts[area] += 1
+        # modified_files 已 per-path 去重帶 count（編輯次數）；legacy entry 無 count → 1
+        area_counts[area] += int(m.get("count", 1))
 
     work_areas = [{"area": a, "count": c} for a, c in area_counts.most_common()]
     primary_area = work_areas[0]["area"] if work_areas else "session-work"
@@ -495,19 +297,19 @@ def _build_episodic_summary(state: Dict[str, Any]) -> Dict[str, Any]:
 
     atoms_referenced = list(state.get("injected_atoms", []))
 
-    # V2.10: Read tracking
+    # Read tracking
     accessed = state.get("accessed_files", [])
     accessed_areas: Counter = Counter()
     for a in accessed:
         area = _extract_area(a.get("path", ""))
         accessed_areas[area] += 1
 
-    # Topic tracker enrichment (v2.2)
+    # Topic tracker enrichment
     tracker = state.get("topic_tracker", {})
     intent_dist = tracker.get("intent_distribution", {})
     dominant_intent = max(intent_dist, key=intent_dist.get) if intent_dist else "general"
 
-    # V2.10: Use accessed areas as fallback for primary_area when no modifications
+    # Use accessed areas as fallback for primary_area when no modifications
     if not work_areas and accessed_areas:
         acc_areas = [{"area": a, "count": c} for a, c in accessed_areas.most_common()]
         primary_area = acc_areas[0]["area"] if acc_areas else "session-work"
@@ -521,7 +323,11 @@ def _build_episodic_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "dominant_intent": dominant_intent,
         "intent_distribution": intent_dist,
         "prompt_count": tracker.get("prompt_count", 0),
-        "session_description": tracker.get("first_prompt_summary", ""),
+        # 記錄端（_update_topic_tracker）已剔 harness 雜訊；此處再過一次是防
+        # 修正前就存在的舊 state（殘留 <ide_opened_file> 等標籤）繼續污染摘要。
+        "session_description": sanitize_harness_noise(
+            tracker.get("first_prompt_summary", "")
+        )[:200],
         "keyword_topics": tracker.get("keyword_signals", []),
         "related_episodic": tracker.get("related_episodic", []),
         "accessed_files": accessed,
@@ -548,52 +354,18 @@ def _generate_triggers(state: Dict[str, Any], work_areas: list) -> list:
     for atom_name in state.get("injected_atoms", []):
         triggers.add(atom_name.lower())
 
-    # Keyword topics from topic tracker (v2.2)
+    # Keyword topics from topic tracker
     for kw in state.get("topic_tracker", {}).get("keyword_signals", [])[:5]:
         triggers.add(kw.lower())
 
     return sorted(triggers)[:12]
 
 
-def _update_memory_index(memory_dir: Path, atom_name: str, triggers: list) -> None:
-    """Append a row to MEMORY.md atom index table."""
-    index_path = memory_dir / MEMORY_INDEX
-    if not index_path.exists():
-        return
-
-    text = index_path.read_text(encoding="utf-8-sig")
-    trigger_str = ", ".join(triggers)
-    new_row = f"| {atom_name} | memory/{atom_name}.md | {trigger_str} |"
-
-    lines = text.splitlines()
-    insert_idx = None
-    in_table = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("| Atom") or stripped.startswith("|Atom"):
-            in_table = True
-            continue
-        if in_table:
-            if stripped.startswith("|---"):
-                continue
-            if stripped.startswith("|"):
-                insert_idx = i
-            else:
-                break
-
-    if insert_idx is not None:
-        lines.insert(insert_idx + 1, new_row)
-    else:
-        lines.append(new_row)
-
-    index_path.write_text("\n".join(lines), encoding="utf-8")
-
-
 # ─── Episodic Section Builders ───────────────────────────────────────────────
 
 
 def _build_read_tracking_section(summary: Dict[str, Any]) -> str:
-    """Build '## 閱讀軌跡' section — compressed summary (V2.14 token diet).
+    """Build '## 閱讀軌跡' section — compressed summary (token diet).
 
     Instead of listing every file path (which vector search can't match anyway),
     produce a compact summary: count + area breakdown.
@@ -640,7 +412,7 @@ def _build_cross_session_section(state: Dict[str, Any]) -> str:
 
 
 def _build_conflict_section(state: Dict[str, Any]) -> str:
-    """V2.11: Build '## ⚠ 衝突警告' section from conflict detection results."""
+    """Build '## ⚠ 衝突警告' section from conflict detection results."""
     warnings = state.get("conflict_warnings", [])
     if not warnings:
         return ""
@@ -681,37 +453,17 @@ def _generate_episodic_atom(
     atom_path = _resolve_episodic_filename(episodic_dir, date_compact, slug)
     atom_name = atom_path.stem
 
-    # Build knowledge lines
+    # Build knowledge lines — 知識段只放「具體行動知識」（LLM 萃取項 + 覆轍信號）。
+    # 檔案數/區域/版控次數等 session 進度統計是流水帳不是知識：工作範圍改記在
+    # 摘要段、閱讀/版控統計已有 ## 閱讀軌跡、引用 atoms 已有 ## 關聯，不重複塞。
     knowledge_lines = []
-    if summary["work_areas"]:
-        areas_str = ", ".join(
-            f"{wa['area']} ({wa['count']} files)" for wa in summary["work_areas"]
-        )
-        knowledge_lines.append(f"- [臨] 工作區域: {areas_str}")
-    knowledge_lines.append(f"- [臨] 修改 {summary['files_modified']} 個檔案")
-    if summary["atoms_referenced"]:
-        knowledge_lines.append(
-            f"- [臨] 引用 atoms: {', '.join(summary['atoms_referenced'])}"
-        )
     for ki in summary["knowledge_items"]:
-        # V2.22: Filter out plan-type knowledge items from episodic atoms
+        # Filter out plan-type knowledge items from episodic atoms
         if is_plan_content(ki.get("content", "")):
             continue
         knowledge_lines.append(f"- [{ki['classification'].strip('[]')}] {ki['content']}")
 
-    # V2.10: Read tracking summary
-    if summary.get("files_accessed", 0) > 0:
-        knowledge_lines.append(f"- [臨] 閱讀 {summary['files_accessed']} 個檔案")
-        if summary.get("accessed_areas"):
-            read_areas_str = ", ".join(
-                f"{ra['area']} ({ra['count']})" for ra in summary["accessed_areas"][:5]
-            )
-            knowledge_lines.append(f"- [臨] 閱讀區域: {read_areas_str}")
-    vcs = summary.get("vcs_queries", [])
-    if vcs:
-        knowledge_lines.append(f"- [臨] 版控查詢 {len(vcs)} 次")
-
-    # V2.17: 覆轍信號 — record cross-session retry patterns
+    # 覆轍信號 — record cross-session retry patterns
     rut_signals = []
     edit_counts = state.get("edit_counts", {})
     for fpath, cnt in edit_counts.items():
@@ -723,15 +475,28 @@ def _generate_episodic_atom(
     if rut_signals:
         knowledge_lines.append(f"- [臨] 覆轍信號: {', '.join(rut_signals)}")
 
-    # Build 摘要 section (v2.2)
+    if not knowledge_lines:
+        knowledge_lines.append(
+            "- （本 session 無具體行動知識；工作軌跡見摘要與閱讀軌跡）"
+        )
+
+    # Build 摘要 section（工作範圍統計歸此，不佔知識段）
     desc = summary.get("session_description", "")
     dom_intent = summary.get("dominant_intent", "general")
     prompt_count = summary.get("prompt_count", 0)
     summary_line = f"{dom_intent.capitalize()}-focused session ({prompt_count} prompts)."
     if desc:
         summary_line += f" {desc}"
+    summary_extra = ""
+    if summary["work_areas"]:
+        areas_str = ", ".join(
+            f"{wa['area']} ({wa['count']})" for wa in summary["work_areas"]
+        )
+        summary_extra = (
+            f"\n\n- 工作範圍: {areas_str}（修改 {summary['files_modified']} 檔）"
+        )
 
-    # Build 關聯 section (v2.2)
+    # Build 關聯 section
     relation_lines = []
     intent_dist = summary.get("intent_distribution", {})
     if intent_dist:
@@ -745,7 +510,24 @@ def _generate_episodic_atom(
         relation_lines.append(
             f"- Referenced atoms: {', '.join(summary['atoms_referenced'])}"
         )
+    # oscillation 資料源：wg_evasion._detect_oscillation 掃 episodic 的
+    # 「修改 atoms: a, b」行（split("修改 atoms:")[-1] 再逗號切）——marker 格式
+    # 與該掃描邏輯對拍（verify_episodic_osc_marker 斷言）。過濾條件鏡像
+    # wg_evasion._collect_iteration_metrics（/memory/ 下 .md、排除索引/變更檔）。
+    modified_atom_names = sorted({
+        p.rsplit("/", 1)[-1][:-3]
+        for p in (
+            m.get("path", "").replace("\\", "/")
+            for m in state.get("modified_files", [])
+        )
+        if "/memory/" in p and p.endswith(".md")
+        and p.rsplit("/", 1)[-1][:-3] not in ("MEMORY", "_CHANGELOG", "_CHANGELOG_ARCHIVE")
+    })
+    if modified_atom_names:
+        relation_lines.append(f"- 修改 atoms: {', '.join(modified_atom_names)}")
 
+    # episodic atom .md 檔頭不再寫 Last-used / Confirmations / ReadHits
+    # （這些計數搬到 <atom>.access.json，由 atom_access.init_access 在落檔後建立）
     content = (
         f"# Session: {today} {summary['primary_area']}\n"
         f"\n"
@@ -753,15 +535,13 @@ def _generate_episodic_atom(
         f"- Confidence: [臨]\n"
         f"- Type: episodic\n"
         f"- Trigger: {', '.join(triggers)}\n"
-        f"- Last-used: {today}\n"
         f"- Created: {today}\n"
-        f"- Confirmations: 0\n"
         f"- TTL: 24d\n"
         f"- Expires-at: {expires}\n"
         f"\n"
         f"## 摘要\n"
         f"\n"
-        f"{summary_line}\n"
+        f"{summary_line}{summary_extra}\n"
         f"\n"
         f"## 知識\n"
         f"\n"
@@ -781,11 +561,19 @@ def _generate_episodic_atom(
         f"\n"
         f"| 日期 | 變更 | 來源 |\n"
         f"|------|------|------|\n"
-        f"| {today} | 自動建立 episodic atom (v2.2) | session:{session_id[:8]} |\n"
+        f"| {today} | 自動建立 episodic atom | session:{session_id[:8]} |\n"
     )
 
-    atom_path.write_text(content, encoding="utf-8")
-    # v2.2: Episodic atoms NOT listed in MEMORY.md index (TTL 24d, vector search discovers them)
+    # episodic atom 走 funnel write_raw（在 SKIP_DIRS 不算 V4 atom，
+    # 但仍經 audit log 確保 PreToolUse 強制門禁可放行）
+    write_raw(atom_path, content, source="hook:episodic", op="episodic_create")
+    # 同步建立 access.json 旁路檔（first_seen=今天，後續注入時 increment_read_hits）
+    try:
+        from lib.atom_access import init_access
+        init_access(atom_path, first_seen=today, source="hook:episodic")
+    except (ImportError, OSError, ValueError):
+        pass
+    # Episodic atoms NOT listed in MEMORY.md index (TTL 24d, vector search discovers them)
 
     # Debug log: one-line summary instead of full content (full is in atom file)
     kn_count = len(knowledge_lines)
@@ -798,7 +586,7 @@ def _generate_episodic_atom(
     return atom_name
 
 
-# ─── V2.7: Output Quality Feedback ──────────────────────────────────────────
+# ─── Output Quality Feedback ──────────────────────────────────────────
 
 
 def _check_output_quality(
@@ -858,3 +646,66 @@ def _check_output_quality(
             }
 
     return None
+
+
+# ─── SessionEnd 輕量 Episodic Purge（兌現 24d TTL）───────────────────────────
+
+# 只掃檔頭（Expires-at 落在 front-matter 前 ~600 字內），避免整檔讀入。
+_EXPIRES_RE = re.compile(r"^\s*-\s*Expires-at:\s*(\d{4}-\d{2}-\d{2})\s*$", re.MULTILINE)
+
+
+def _purge_expired_episodic(
+    episodic_dir: Optional[Path] = None, *, today: Optional[str] = None
+) -> List[str]:
+    """把 episodic_dir 內 `Expires-at < today` 的 atom（連 .access.json sidecar）
+    搬到 `memory/_distant/{year}_{month}/`，兌現 24d TTL。
+
+    存在理由：self_iteration/decay/forget/memory-audit 全把 episodic/ 列 SKIP_DIRS，
+    無任何機制依 Expires-at 淘汰 → 過期 episodic 堆積成假 TTL + 主動製造 lost-in-middle。
+    本 pass 是唯一淘汰者，獨立於 decay/forget（不走它們刻意 SKIP 的路徑）。
+
+    - `_distant/` 已被 sync-atom-index EXCLUDED_DIR_PARTS + vector index_distant=False
+      排除 → 搬入即不再被 `_search_episodic_context` 掃到/注入，且可逆
+      （`memory-audit.py --restore` 搬回即復原）。
+    - 走 `lib.atom_access.move_atom_pair` funnel（原子搬 .md+sidecar，sidecar 失敗
+      rollback .md），非裸 shutil.move → read_hits/α/β 計數不變孤兒。
+    - fail-open：整體與逐檔皆包 try/except，任何錯誤不阻斷 SessionEnd 收尾。
+
+    回被搬走的 atom stem list。
+    """
+    ep_dir = episodic_dir or EPISODIC_DIR
+    if not ep_dir.exists():
+        return []
+    today_s = today or date.today().isoformat()
+    try:
+        _t = date.fromisoformat(today_s)  # 桶月份跟隨 today 基準（測試可決定論）
+    except ValueError:
+        _t = date.today()
+    # _distant 落在 memory/ 根（episodic_dir 的上一層），與 memory-audit.move_to_distant 慣例對齊
+    distant_root = ep_dir.parent / "_distant" / f"{_t.year}_{_t.month:02d}"
+
+    try:
+        candidates = sorted(ep_dir.glob("episodic-*.md"))
+    except OSError as e:
+        _atom_debug_error("episodic:purge_glob", e)
+        return []
+
+    moved: List[str] = []
+    for md in candidates:
+        try:
+            head = md.read_text(encoding="utf-8-sig")[:600]
+            m = _EXPIRES_RE.search(head)
+            if not m:
+                continue  # 無 Expires-at 欄位 → 保守不動
+            # YYYY-MM-DD 定寬字串序 == 日期序；== today 視為未過（保留到期當天）
+            if m.group(1) >= today_s:
+                continue
+            dst = distant_root / md.name
+            if dst.exists():
+                continue  # 目標同名已存在 → 跳過，不覆蓋
+            move_atom_pair(md, dst)  # 原子搬 .md + .access.json sidecar（含 rollback）
+            moved.append(md.stem)
+        except (OSError, ValueError) as e:
+            _atom_debug_error("episodic:purge_one", e)
+            continue
+    return moved

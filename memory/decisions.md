@@ -2,74 +2,29 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: 全域決策, workflow, guardian, hooks, MCP, 記憶系統決策, 記憶系統架構, 記憶系統, 原子記憶, atom memory, 決策
-- Last-used: 2026-08-15
-- Confirmations: 107
-- Related: decisions-architecture
+- Trigger: 決策, 記憶系統, 原子記憶, 架構細節, context budget
+- Related: decisions-architecture, toolchain, toolchain-ollama
 
 ## 知識
 
-### 核心架構
-- [固] 原子記憶 V2.22：注入閘門修正。`wg_content_classify.py` 共用模組（plan/draft 判斷）；extract-worker classify gate + LLM prompt 排除 plan；wg_episodic 過濾 plan 型 knowledge_lines；_AIDOCS_TEMP_PATTERNS 統一為 is_plan_filename()
-- [固] 原子記憶 V2.21 Phase 4：現有資料遷移。`migrate-v221.py`（tools/）：_AIAtoms/*.md + 個人 memory/*.md 合併 → {project_root}/.claude/memory/；舊 MEMORY.md 改指標型（Status: migrated-v2.21）；project-registry.json 自動更新；已遷移：SGI / 加班系統 / FastSVNViewer
-- [固] 原子記憶 V2.21 Phase 3：專案自治層建置。`init-project` skill Step 6 建立 `.claude/` 結構（memory/, hooks/, .gitignore, MEMORY.md 模板, project_hooks.py delegate 模板）；`_call_project_hook()` subprocess 隔離呼叫（5s timeout, 全例外吞噬）；`handle_session_start` 末尾呼叫 on_session_start delegate
-- [固] 原子記憶 V2.21 Phase 2：Project Registry + 路徑切換。`register_project()` SessionStart 自動呼叫；`get_project_memory_dir()` 新路徑優先（{project_root}/.claude/memory/）；`find_project_root()` 加 `.claude/memory/MEMORY.md` 辨識；_AIAtoms merge 邏輯移除
-- [固] 原子記憶 V2.20：路徑集中化（wg_paths.py）+ bug 修復（C5~C7, W8~W13）
-- [固] 原子記憶 V2.18：V2.17 全功能 + Section-Level 注入 + Trigger 精準化 + 規則精簡 + 反向參照自動修復
-- [固] 雙 LLM：Claude Code（雲端決策）+ Ollama（本地語意處理）
-- [固] 6 hook 事件全由 workflow-guardian.py 統一處理
+> 架構細節（核心架構 / V3 管線 / SessionStart 風暴修復）已移至 `decisions-architecture.md`
 
-### 記憶檢索
-- [固] UserPromptSubmit: Intent 分類 → Trigger 匹配 → Vector Search → Ranked Merge → additionalContext
-- [固] 降級順序：Ollama 不可用 → 純 keyword | Vector Service 掛 → graceful fallback
-- [固] 索引 2 層：global → project，`**/*.md` 遞迴掃描 + `_` 前綴目錄跳過
-
-### 回應捕獲
-- [固] SessionEnd 全量掃描 + Stop hook 逐輪增量萃取，共用 _spawn_extract_worker()
-- [固] 萃取結果一律 [臨]，由 Confirmations 計數驅動後續晉升
-- [固] SessionEnd 萃取由 extract-worker.py detached subprocess 執行（hook timeout 不足）
-
-### 跨 Session 鞏固
-- [固] 廢除自動晉升 [臨]→[觀]，改為 Confirmations +1 簡單計數
-- [固] 4+ sessions 命中 → 建議晉升（不自動執行）
-
-### Episodic
-- [固] SessionEnd 自動生成，TTL 24d，靠 vector search 發現（不列入 MEMORY.md）
-- [固] 門檻：modified_files ≥ 1 且 session ≥ 2 分鐘；純閱讀 ≥ 5 檔也生成
+### 跨 Session 鞏固（效用驅動）
+- [固] 晉升門檻（SYNC: server.js toolAtomPromote / wg_atoms._self_iterate_atoms / lib.atom_access）：
+  - 效用 Wilson 軌為**唯一自動晉升路徑**：效用 Wilson 下界（Beta-Bernoulli α=useful_hits/β=used_fail；succ=α−1,fail=β−1,n=succ+fail）≥ promote_lb(0.6) 且 n ≥ min_n(3)，z=1.96；降級候選 ≤ demote_lb(0.35) 且 n≥3（不自動降，列裁決）；慢衰減 λ=0.97（SessionEnd）
+  - Confirmations 軌已除役（唯一資料源 per-turn extraction 停產，全庫 confirmation_events=0）
+  - ReadHits（注入讀取）：純曝光計數、不參與晉升（防純注入頻率晉升劣化品質，Xiong 2505.16067）
+  - 旋鈕：workflow/config.json usefulness.{promote_lb,demote_lb,min_n,wilson_z,decay_lambda,rare_token_min,lexical_overlap_min}
 
 ### 品質機制
-- [固] Context Budget：additionalContext 硬上限 3000 tokens，超額按 ACT-R activation truncate
-- [固] Write Gate：品質閘門，dedup 0.80，使用者明確指示時跳過
-- [固] 衝突偵測：SessionEnd 對修改 atoms 做向量搜尋，寫入 episodic 警告
 - [固] 自我迭代精簡為 3 條：品質函數（Hook）、證據門檻（Claude）、震盪偵測（Hook）
-- [固] V2.16 自我迭代自動化：SessionEnd 衰減分數掃描 + [臨]→[觀] 自動晉升（Confirmations ≥ 20）+ 震盪狀態跨 Session 持久化
-- [固] V2.17 覆轍偵測：episodic 寫入覆轍信號（same_file_3x / retry_escalation）→ SessionStart 掃描跨 session 重複 → 注入 [Guardian:覆轍] 警告
-- [固] AIDocs 內容閘門：PostToolUse 偵測 _AIDocs/ 下暫時性檔名（Plan/TODO/Roadmap/Draft 等）→ additionalContext 警告（不硬擋）
-- [固] V2.18 反向參照自動修復：SessionEnd 呼叫 `atom-health-check.py --fix-refs`（全域+專案層），冪等去重，10s timeout
-
-### Wisdom Engine
-- [固] 2 硬規則（file_count+is_feature → confirm; touches_arch+file_count → plan）
-- [固] 冷啟動零 token，注入上限 ≤90 tokens，lazy import + graceful fallback
 
 ### Fix Escalation
 - [固] 同一問題修正第 2 次起 → 6 Agent 精確修正會議
 - [固] Guardian 自動偵測 retry_count ≥ 2 → 注入信號
-
-### 歷史決策
-- [固] 記憶檢索統一用 Python（Node.js memory-v2 已於 2026-03-05 退役）
-- [固] Stop hook 只保留 Guardian 閘門
 
 ## 行動
 
 - 記憶寫入走 write-gate 品質閘門
 - 向量搜尋 fallback：Ollama → sentence-transformers → keyword
 - Guardian 閘門最多阻止 2 次，第 3 次強制放行
-
-## 演化日誌
-
-> 詳細版本演進：`_reference/decisions-history.md`
-
-- 2026-03-19: 精修拆分 — 技術細節移至 decisions-architecture，歷史移至 _reference
-- 2026-03-22: V2.16 自我迭代自動化決策記錄
-- 2026-03-22: V2.17 覆轍偵測 — 寄生式跨 session 重複失敗模式偵測
-- 2026-03-23: V2.17 合併升級至公司電腦

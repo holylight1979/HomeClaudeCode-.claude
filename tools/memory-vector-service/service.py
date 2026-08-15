@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 import traceback
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, urlparse
 # Add parent dir to path for imports
 SERVICE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVICE_DIR))
-# V2.20: import wg_paths for centralized path resolution
+# import wg_core for centralized path resolution
 sys.path.insert(0, str(Path.home() / ".claude" / "hooks"))
 
 from config import load_config, VECTORDB_DIR
@@ -47,10 +47,19 @@ def _init_service():
     _start_time = time.time()
 
     try:
+        _t = time.time()
         _embedder = create_embedder(_config)
-        print(f"[service] Embedder loaded: {_embedder.__class__.__name__}", file=sys.stderr)
+        print(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} [service] Embedder loaded: "
+            f"{_embedder.__class__.__name__} ({time.time() - _t:.1f}s)",
+            file=sys.stderr, flush=True,
+        )
     except Exception as e:
-        print(f"[service] WARNING: No embedder available: {e}", file=sys.stderr)
+        print(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} [service] WARNING: "
+            f"No embedder available: {e}",
+            file=sys.stderr, flush=True,
+        )
         _embedder = None
 
 
@@ -61,8 +70,31 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
     """HTTP request handler for Memory Vector Service."""
 
     def log_message(self, format, *args):
-        """Override to write to stderr with timestamp."""
-        print(f"[service] {self.client_address[0]} - {format % args}", file=sys.stderr)
+        """Sanitized: strip query string from request line (議題 #6, 2026-04-28).
+
+        log_request 路徑會以 format='"%s" %s %s', args=(request_line, code, size)
+        呼叫；request_line 形如 'GET /search?q=<sensitive> HTTP/1.1'。此處將
+        path 的 query string 截掉，其他 log 路徑（log_error / 直呼 log_message）
+        不變。Parse 失敗 fail-open 保留原行為。
+        """
+        sanitized_args = args
+        if format == '"%s" %s %s' and args:
+            try:
+                request_line = args[0]
+                if isinstance(request_line, str):
+                    parts = request_line.split(' ', 2)
+                    if len(parts) >= 2:
+                        method = parts[0]
+                        path_clean = parts[1].split('?', 1)[0]
+                        http_ver = parts[2] if len(parts) > 2 else 'HTTP/1.1'
+                        sanitized_args = (f'{method} {path_clean} {http_ver}',) + tuple(args[1:])
+            except Exception:
+                sanitized_args = args  # fail-open
+        try:
+            msg = format % sanitized_args
+        except Exception:
+            msg = format  # fail-open: even formatting failure must not crash
+        print(f"[service] {self.client_address[0]} - {msg}", file=sys.stderr)
 
     def handle_one_request(self):
         """Override to catch ConnectionAbortedError / BrokenPipeError."""
@@ -136,7 +168,7 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
             "/index/incremental": self._handle_index_incremental,
             "/reload": self._handle_reload,
             "/shutdown": self._handle_shutdown,
-            # Phase 3 endpoints
+            # enhanced search / rerank / extract endpoints
             "/search/enhanced": self._handle_search_enhanced,
             "/rerank": self._handle_rerank,
             "/extract": self._handle_extract,
@@ -171,6 +203,9 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         top_k = int(params.get("top_k", [str(_config.get("search_top_k", 5))])[0])
         min_score = float(params.get("min_score", [str(_config.get("search_min_score", 0.65))])[0])
         layer = params.get("layer", ["all"])[0]
+        user = params.get("user", [""])[0] or None
+        roles_raw = params.get("roles", [""])[0]
+        roles = [r.strip() for r in roles_raw.split(",") if r.strip()] or None
 
         results = search(
             query=q,
@@ -179,11 +214,13 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
             min_score=min_score,
             layer_filter=layer if layer != "all" else None,
             embedder=_embedder,
+            user=user,
+            roles=roles,
         )
         self._send_json(results)
 
     def _handle_search_ranked(self, params: Dict):
-        """GET /search/ranked?q=...&intent=general&top_k=5&min_score=0.50"""
+        """GET /search/ranked?q=...&intent=general&top_k=5&min_score=0.50&user=&roles="""
         q = params.get("q", [""])[0]
         if not q:
             self._send_error(400, "Missing query parameter 'q'")
@@ -193,6 +230,9 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         top_k = int(params.get("top_k", [str(_config.get("search_top_k", 5))])[0])
         min_score = float(params.get("min_score", ["0.50"])[0])
         layer = params.get("layer", ["all"])[0]
+        user = params.get("user", [""])[0] or None
+        roles_raw = params.get("roles", [""])[0]
+        roles = [r.strip() for r in roles_raw.split(",") if r.strip()] or None
 
         results = ranked_search(
             query=q,
@@ -202,11 +242,13 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
             min_score=min_score,
             layer_filter=layer if layer != "all" else None,
             embedder=_embedder,
+            user=user,
+            roles=roles,
         )
         self._send_json(results)
 
     def _handle_search_ranked_sections(self, params: Dict):
-        """GET /search/ranked-sections?q=...&intent=general&top_k=5&max_sections=3"""
+        """GET /search/ranked-sections?q=...&intent=general&top_k=5&max_sections=3&user=&roles="""
         q = params.get("q", [""])[0]
         if not q:
             self._send_error(400, "Missing query parameter 'q'")
@@ -217,6 +259,9 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         max_sections = int(params.get("max_sections", ["3"])[0])
         min_score = float(params.get("min_score", ["0.50"])[0])
         layer = params.get("layer", ["all"])[0]
+        user = params.get("user", [""])[0] or None
+        roles_raw = params.get("roles", [""])[0]
+        roles = [r.strip() for r in roles_raw.split(",") if r.strip()] or None
 
         results = ranked_search_sections(
             query=q,
@@ -227,6 +272,8 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
             min_score=min_score,
             layer_filter=layer if layer != "all" else None,
             embedder=_embedder,
+            user=user,
+            roles=roles,
         )
         self._send_json(results)
 
@@ -253,8 +300,8 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         )
 
         # Enrich each result with summary + triggers from the atom file
-        # V2.20: use wg_paths for path resolution
-        from wg_paths import MEMORY_DIR as _mem_dir, discover_all_project_memory_dirs
+        # use wg_paths for path resolution
+        from wg_core import MEMORY_DIR as _mem_dir, discover_all_project_memory_dirs
         _proj_dir_map = {s: d for s, d in discover_all_project_memory_dirs()}
         for r in results:
             file_path = r.get("file_path", "")
@@ -366,7 +413,7 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
         self._send_json({"status": "shutting_down"})
         threading.Timer(0.5, lambda: os._exit(0)).start()
 
-    # ── Phase 3 placeholders ──
+    # ── enhanced search / rerank / extract handlers ──
 
     def _handle_search_enhanced(self):
         body = self._parse_json_body()
@@ -415,10 +462,18 @@ class VectorServiceHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int = 3849):
-    """Start the HTTP daemon."""
+    """Start the HTTP daemon.
+
+    ThreadingHTTPServer：每請求獨立執行緒，長請求（/rerank、/search/enhanced 等
+    走 LLM 的路徑）不會 block /health，starter 才不會把忙碌中的健康服務誤判 hang 死。
+    執行緒安全依據：LanceDB 每請求各自 connect/open_table（讀走版本快照）；
+    索引寫入已由 _index_lock 序列化在單一背景執行緒；OllamaClient 每呼叫獨立
+    HTTP request；_request_count 為 best-effort 計數（競態僅影響統計值）。
+    """
     _init_service()
 
-    server = HTTPServer(("127.0.0.1", port), VectorServiceHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), VectorServiceHandler)
+    server.daemon_threads = True
     print(f"[service] Memory Vector Service listening on http://127.0.0.1:{port}", file=sys.stderr)
 
     # Write PID file for management
@@ -432,7 +487,10 @@ def run_server(port: int = 3849):
             pid_file.unlink(missing_ok=True)
         except Exception:
             pass
-        server.shutdown()
+        # server.shutdown() 會阻塞等 serve_forever 迴圈退出；signal handler 跑在
+        # 主執行緒（= serve_forever 所在執行緒），同執行緒同步呼叫會互等死鎖
+        # （POSIX 面；Windows SIGTERM 面亦同理）→ 改由獨立 thread 觸發。
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, cleanup)
     signal.signal(signal.SIGINT, cleanup)

@@ -2,10 +2,11 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: svn, svn-update, TortoiseSVN, 衝突, conflict
-- Last-used: 2026-03-29
-- Confirmations: 97
-- Related: workflow-rules
+- Type: procedural
+- Trigger: svn, svn-update, TortoiseSVN
+- Created: 2026-03-18
+- Tags: svn, vcs
+- Related: workflow-rules, git-已push-commit-勿改寫-雙-push-url-gitlab-main-force-保護致遠端分叉
 
 ## 知識
 
@@ -37,9 +38,3 @@
 - 使用者拒絕 → 記錄已詢問，不再重複
 - 衝突不自動解決，AI 分析 + 使用者確認
 
-## 演化日誌
-
-| 日期 | 變更 | 來源 |
-|------|------|------|
-| 2026-03-06 | 原始規則（含在 workflow-rules.md 中） | session:SVN 工作流規則建立 |
-| 2026-03-18 | 從 workflow-rules.md 拆分為獨立 atom | atom-debug 精準化 |

@@ -1,31 +1,41 @@
 # Atom Index — Global
 
-> Session 啟動時先讀此索引。比對 Trigger → Read 對應 atom。
-| Atom | Path | Trigger |
-|------|------|---------|
-| preferences | memory/preferences.md | 偏好, 風格, 習慣, 語言, 回應, 執P, 執驗上P, 上GIT |
-| decisions | memory/decisions.md | 全域決策, workflow, guardian, hooks, MCP, 記憶系統決策, 記憶系統架構, 記憶系統, 原子記憶, atom memory, 決策 |
-| decisions-architecture | memory/decisions-architecture.md | 架構細節, vector service, ollama backend, extraction, ACT-R, episodic tracking, context budget, 萃取, 注入, injection, vector, 向量, token budget |
-| excel-tools | memory/excel-tools.md | Excel, xls, xlsx, 試算表, spreadsheet, openpyxl, xlrd |
-| workflow-rules | memory/workflow-rules.md | 工作流程, 大型任務, 分階段, SOP, 任務拆分, 上版, GIT, Phase |
-| workflow-icld | memory/workflow-icld.md | ICLD, 閉環, Sprint, 功能拆解, 開發計畫, 大型新功能, 新系統規劃, 規格書 |
-| workflow-svn | memory/workflow-svn.md | svn, svn-update, TortoiseSVN, 衝突, conflict |
-| fail-env | memory/failures/env-traps.md | Win環境陷阱, Windows, MSYS2, Node.js, npx, Ollama, port, MCP啟動, VSCode |
-| fail-assumptions | memory/failures/wrong-assumptions.md | 假設錯誤, 直覺偏差, 為何沒生效, 空目錄, metrics異常, 功能沒反應 |
-| fail-silent | memory/failures/silent-failures.md | 靜默, silent, 看似正常, setdefault, knowledge_queue為空, 沒報錯但沒動作, 吞掉錯誤 |
-| fail-cognitive | memory/failures/cognitive-patterns.md | 過度工程, 代理指標, proxy metric, AI看不懂, AI在打轉, 品質回饋 |
-| toolchain | memory/toolchain.md | 工具鏈, 環境設定, bash指令, command, bash, git, python, npm |
-| toolchain-ollama | memory/toolchain-ollama.md | ollama, dual-backend, rdchat, qwen3, embedding, 萃取品質, thinking, Open WebUI |
-| gdoc-harvester | memory/gdoc-harvester.md | harvester, Google Docs, Sheets, 收割, Playwright, cookie, export |
-| feedback-research | memory/feedback_research_first.md | 試錯, trial-and-error, 不熟悉, API試錯, 框架不熟, 搜尋策略, research |
-| doc-index-system | memory/doc-index-system.md | 記憶系統架構, 檔案結構, hook, skill, tool, 記憶升級, 記憶迭代, 目錄結構 |
-| fix-escalation | memory/feedback_fix_escalation.md | 重試, retry, escalation, 精確修正, fix-escalation, 修不好, 又壞了, 失敗 |
-| fail-misdiagnosis | memory/failures/misdiagnosis-verify-first.md | 誤診, 驗證優先, verify first, 診斷失敗, 先射箭再畫靶, 假設錯誤就規劃, 過度規劃, 沒驗證就動手 |
-| feedback-no-test-to-svn | memory/feedback_no_test_to_svn.md | 上SVN, svn commit, 測試碼, 新手作業, 練習, 不可上傳 |
-| feedback-global-install | memory/feedback_global_install.md | 安裝MCP, 安裝skill, install MCP, install skill, add MCP, 新增MCP, 新增skill |
-| hardware | memory/hardware.md | 硬體, 電腦, 升級, hardware, PC, GPU, CPU, 顯卡, 記憶體, RAM, 主機板 |
-| ryujinx-cheats | memory/ryujinx-cheats.md | ryujinx, 龍神, switch模擬器, cheats, 金手指, 模組, mods, TID, BID, BuildID, enabled.txt, atmosphere, exefs, romfs, 人中之龍 |
-| self-iteration | memory/_reference/self-iteration.md | 自我迭代, self-iteration, 演進原則, 規則管理 |
-| v3-design-spec | memory/_reference/v3-design-spec.md | V2.9, V3, 檢索強化, project-alias, ACT-R, blind-spot |
-| v3-research-insights | memory/_reference/v3-research-insights.md | V3, 研究, 認知科學, 佛學, ACT-R, spreading activation |
-| feedback-identity-decision | memory/feedback_identity_decision.md | 確認, 要刪嗎, 要改嗎, 使用者確認, 問使用者 |
+> Hook 自動匹配 trigger 注入相關 atom（完整觸發表見 `_atom_index.json` / `_ATOM_INDEX.md` mirror）。
+
+| Atom | 說明 |
+|------|------|
+| decisions-architecture | 架構決策 |
+| decisions | 全域決策 |
+| preferences | 使用者偏好（補充） |
+| toolchain-ollama | Ollama Dual-Backend 實戰記憶 |
+| toolchain | 工具鏈實戰記憶 |
+| workflow-icld | 增量式閉環開發（ICLD） |
+| workflow-rules | 工作流規則（全域） |
+| workflow-svn | SVN 工作流規則 |
+| workflow-parallel-agents | 多 agent 並行：拆 ≥2 sub-agent 同 message dispatch 的評估準則 |
+| goal-driven-verify-loopkarpathy-吸收 | goal-driven-verify-loop（karpathy 吸收） |
+| 自己flag的維護動作直接做完不要反問 | 自己flag的維護動作直接做完不要反問 |
+| escalation-hook-在-edit-count-proxy-上-false-fire-的辨識無真實失敗迴圈時不盲從不編造 | escalation-hook 在 edit-count-proxy 上 false-fire 的辨識（無真實失敗迴圈時不盲從不編造） |
+| 併發-session-共用工作樹-收尾選擇性-staging-勿-git-add-a | 併發 session 共用工作樹-收尾選擇性 staging 勿 git add -A |
+| winget-升不動-powershell-msi-與-msix-通道分裂 | winget 升不動 PowerShell — MSI 與 MSIX 通道分裂 |
+| winforms-多選資料夾-net-8-無-multiselect-須走-ifileopendialog | WinForms 多選資料夾 — .NET 8 無 Multiselect 須走 IFileOpenDialog |
+| commit-前必須核對-staged-清單而非只信自己-add-了什麼 | commit 前必須核對 staged 清單而非只信自己 add 了什麼 |
+| minimal-hosting-下-configuretestservices-靜默失效 | minimal hosting 下 ConfigureTestServices 靜默失效 |
+| sed-i-在-crlf-repo-會整檔改換行 | sed -i 在 CRLF repo 會整檔改換行 |
+| 目標展開與收斂-立體菱形體思考模型 | 目標展開與收斂-立體菱形體思考模型 |
+| workflow-research-fanout | workflow-research-fanout |
+| 並行agent產出併入交付物必須標驗證強度分層 | 並行agent產出併入交付物必須標驗證強度分層 |
+| 歸因早停-找到合理嫌疑機制就停止驗證 | 歸因早停-找到合理嫌疑機制就停止驗證 |
+| aspnetcore-關閉卡逾時-requestaborted不觸發-長連線handler內文也要吃linked-token | aspnetcore-關閉卡逾時-requestaborted不觸發-長連線handler內文也要吃linked-token |
+| vendor-二進位-中間目錄路徑會嵌進組件-暫存路徑必須固定否則雜湊不可重現 | vendor-二進位-中間目錄路徑會嵌進組件-暫存路徑必須固定否則雜湊不可重現 |
+| windows認證管理員blob上限-credwrite回傳值必檢-大token禁keyring | windows認證管理員blob上限-credwrite回傳值必檢-大token禁keyring |
+| 混改檔hunk級選擇性staging | 混改檔hunk級選擇性staging |
+| atom-write-global必須省略project-cwd | atom-write-global必須省略project-cwd |
+| 契約加欄位必查手寫映射點-單元綠不代表wire存活 | 契約加欄位必查手寫映射點-單元綠不代表wire存活 |
+| excel-tools | Excel 讀取能力（全域） |
+| hardware | 硬體配置與升級取向 |
+| feedback-* | 行為校正（15 atoms） → [`_AIDocs/Failures/`](../_AIDocs/Failures/) |
+| memory-pipeline-silent-failure-2026-05 | 記憶機制靜默失效（confirmations 零增 + episodic 停擺） → [`_AIDocs/Failures/memory-pipeline-silent-failure-2026-05.md`](../_AIDocs/Failures/memory-pipeline-silent-failure-2026-05.md) |
+| cognitive-patterns | 認知模式偏差（Cognitive Patterns） → [`_AIDocs/Failures/cognitive-patterns.md`](../_AIDocs/Failures/cognitive-patterns.md) |
+
+> 本地範疇（僅 ~/.claude 注入）Lv1 根索引見 `_local_catalog.md`，深層 drill 各層 `_INDEX.md`。

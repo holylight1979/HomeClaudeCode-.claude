@@ -1,50 +1,81 @@
 """
-wg_core.py — Workflow Guardian 共用基礎模組
+wg_core.py — Workflow Guardian 共用基礎模組（V5）
 
-常數、設定載入、State I/O、Output helpers、Debug logging。
-所有 wg_*.py 模組共用此檔。
-
-V2.20: 路徑相關常數/函式已移至 wg_paths.py。
-本模組 re-export 以維持向後相容（下一版移除）。
+統合：
+- 常數 / 設定載入 / State I/O / Output helpers / Debug logging
+- 路徑集中管理（前 wg_paths）
+- PreToolUse 路徑/指令防呆（前 wg_pretool_guards）
+- MCP server 健檢（前 wg_intent._check_mcp_servers）
+- Log rotation
+- Promotion audit log
 """
 
 import json
-import os
-import sys
-import re
-import time
 import math
-from datetime import datetime, timezone
+import os
+import re
+import shutil
+import socket
+import sys
+import time
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ─── Path constants & functions (V2.20: delegated to wg_paths) ───────────────
-# Re-export for backward compatibility. Direct import from wg_paths preferred.
-from wg_paths import (  # noqa: F401
-    CLAUDE_DIR, MEMORY_DIR, EPISODIC_DIR, WORKFLOW_DIR, CONFIG_PATH,
-    MEMORY_INDEX,
-    cwd_to_project_slug, get_project_memory_dir, find_project_root,
-    get_project_claude_dir, get_transcript_path,
-    resolve_episodic_dir, resolve_failures_dir, resolve_staging_dir,
-    resolve_access_json, get_slug_pointer_path,
-    discover_all_project_memory_dirs, discover_memory_layers,
-    state_file_path,
-)
+# ─── 全域路徑常數 ────────────────────────────────────────────────────────────
 
-# ─── Constants (non-path) ────────────────────────────────────────────────────
+CLAUDE_DIR = Path.home() / ".claude"
+MEMORY_DIR = CLAUDE_DIR / "memory"
+EPISODIC_DIR = MEMORY_DIR / "episodic"
+WORKFLOW_DIR = CLAUDE_DIR / "workflow"
+CONFIG_PATH = WORKFLOW_DIR / "config.json"
+# V5+ Realm 維度：SessionEnd 自動搬移的待提示 marker（永不靜默；session_start 讀+清）
+REALM_AUTOMOVE_MARKER = WORKFLOW_DIR / "realm_automove_pending.json"
+MEMORY_INDEX = "MEMORY.md"
+ATOM_INDEX = "_ATOM_INDEX.md"
+REGISTRY_PATH = MEMORY_DIR / "project-registry.json"
 
-CONTEXT_BUDGET_DEFAULT = 3000  # V2.11: default token cap
+# atom 物理位置 / 白名單規則來源（單一來源 lib.atom_locations）
+sys.path.insert(0, str(CLAUDE_DIR / "lib"))
+try:
+    from atom_locations import (
+        atom_writable_dir_segments, failures_atom_stems, is_local_realm_path,
+        is_cross_project_local,
+    )
+except ImportError:
+    atom_writable_dir_segments = None
+    failures_atom_stems = None
+    is_local_realm_path = None
+    is_cross_project_local = None
 
-# Defaults (overridable via config.json)
+# ─── Token budget 單一來源─────────────────────────
+# 三個 budget 概念各司其職，數值不互相推導：
+#   compute_token_budget(prompt) — 每輪 additionalContext 總額（隨 prompt 長度 1000/2000/3000）
+#   CONTEXT_BUDGET_DEFAULT       — _truncate_context_by_activation 的 fallback 上限
+#   TURN_BUDGET_LIMIT            — atom 注入段 per-turn 硬頂（wg_atoms re-export 舊名 _TURN_BUDGET_LIMIT）
+# token 估算器單一口徑：wg_core._estimate_tokens — CJK-aware（中文 ~1.5 tok/字 + ASCII word），
+# transcript/handoff/debug 摘要與 atom 注入預算共用（wg_atoms import 複用）
+CONTEXT_BUDGET_DEFAULT = 3000
+TURN_BUDGET_LIMIT = 500   # atom 注入段 per-turn 硬頂，控每輪 token 稅
+
+
+def compute_token_budget(prompt: str) -> int:
+    """每輪注入總額：短 prompt 少注入，長 prompt 多注入。"""
+    plen = len(prompt)
+    if plen < 50:
+        return 1000
+    elif plen < 200:
+        return 2000
+    else:
+        return 3000
+
+
+# Defaults（可被 config.json 覆寫）
 DEFAULTS = {
     "enabled": True,
     "stop_gate_max_blocks": 2,
     "min_files_to_block": 2,
-    "remind_after_turns": 3,
-    "max_reminders": 3,
     "sync_keywords": ["同步", "sync", "commit", "提交", "結束", "收工"],
-    "completion_indicators": ["已同步", "同步完成", "已更新", "已提交", "committed"],
-    # v2.2 Sprint 2: Session context injection
     "session_context": {
         "enabled": True,
         "max_episodic": 3,
@@ -52,33 +83,56 @@ DEFAULTS = {
         "min_score": 0.35,
         "search_timeout_ms": 1500,
     },
-    # v2.10: _AIDocs Bridge
     "aidocs": {
         "enabled": True,
         "max_session_start_entries": 15,
         "max_prompt_matches": 3,
     },
-    # v2.2 Sprint 2: Proactive classification
+    "sync_reminder": {
+        "enabled": True,
+        "max_reminders": 1,
+    },
+    "docdrift": {
+        "enabled": True,
+        "path_mappings": {},
+        "exclude_patterns": [
+            "_aidocs/", "memory/", "_staging/", ".git/",
+            "node_modules/", "__pycache__/", ".claude/workflow/",
+        ],
+        "keyword_match_threshold": 2,
+        "max_pending_display": 5,
+    },
     "proactive": {
         "pattern_threshold": 2,
         "migration_hint_threshold": 3,
     },
+    "guard": {
+        "cross_realm_write": {
+            "enabled": True,
+            "allowlist": [],
+        },
+    },
 }
 
 
-# ─── Config ──────────────────────────────────────────────────────────────────
+# ─── Config 載入 ─────────────────────────────────────────────────────────────
 
 
 def load_config() -> Dict[str, Any]:
-    """Load config with defaults fallback."""
+    """Load config with defaults fallback。
+
+    config.json 損毀時退 DEFAULTS 但不得靜默（可觀測性鐵律）：log +
+    `_config_parse_failed` 旗標，UPS/SessionStart 見旗標注入一行告警。
+    """
     config = dict(DEFAULTS)
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 user_config = json.load(f)
             config.update(user_config)
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            _atom_debug_error("config:parse_failed", e)
+            config["_config_parse_failed"] = True
     return config
 
 
@@ -93,21 +147,517 @@ def _estimate_tokens(text: str) -> int:
     """CJK-aware token estimation. Chinese ~1.5 tok/char, ASCII ~0.25 tok/word."""
     if not text:
         return 0
-    cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3000' <= c <= '\u303f')
+    cjk = sum(1 for c in text if '一' <= c <= '鿿' or '　' <= c <= '〿')
     ascii_part = len(text) - cjk
     return int(cjk * 1.5 + ascii_part * 0.25)
+
+
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """以 _estimate_tokens 口徑把 text 截到 ≤ max_tokens（字元邊界二分）。
+
+    取代 `text[:budget*4]` 這類 chars/4 換算切片（CJK 下嚴重超額）。
+    """
+    if _estimate_tokens(text) <= max_tokens:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _estimate_tokens(text[:mid]) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]
+
+
+# harness 注入標籤（IDE 開檔/選取、system-reminder、skill 展開）——成對或未閉合
+# （截斷）皆吃到閉合標或字串尾。用於把「使用者訊息」清成「使用者實際打的字」。
+_HARNESS_TAG_RE = re.compile(
+    r"<(system-reminder|ide_opened_file|ide_selection|ide_diagnostics|"
+    r"command-name|command-message|command-args|local-command-stdout)\b[^>]*>"
+    r".*?(?:</\1>|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+# hook 注入殘渣行（[Guardian:*] / [Atom:*] / [Session:Context] / [JIT:*] 等
+# additionalContext 前綴）——整行剔除。
+_HOOK_RESIDUE_LINE_RE = re.compile(
+    r"^\[(?:Guardian|Atom|JIT|Session|Parallel|Workflow Guardian|WG|Role|AIDocs|"
+    r"Context budget)[^\]]*\].*$",
+    re.MULTILINE,
+)
+
+
+def sanitize_harness_noise(text: str) -> str:
+    """剔除 harness 標籤區塊與 hook 注入殘渣行，回收使用者/模型的實際文字。
+
+    用途：topic tracker 的 first_prompt_summary / keyword 訊號、episodic 摘要等
+    「給人看或給 LLM 吃」的文字源頭。純文字處理、fail-open（異常回原文）。
+    """
+    if not text:
+        return ""
+    try:
+        cleaned = _HARNESS_TAG_RE.sub(" ", text)
+        cleaned = _HOOK_RESIDUE_LINE_RE.sub(" ", cleaned)
+        return re.sub(r"\s+", " ", cleaned).strip()
+    except Exception:
+        return text
+
+
+def rotate_log_if_oversized(log_path: Path, max_mb: int = 10, keep: int = 3) -> bool:
+    """Size-based log rotation. Fail-open.
+
+    Rotates `log_path` to `log_path.1` (.1->.2, .2->.3) when > max_mb.
+    Keeps last `keep` rotated copies. Returns True if rotated.
+    Handles Windows-locked / corrupt files gracefully (returns False).
+    """
+    try:
+        if not log_path.exists():
+            return False
+        size_mb = log_path.stat().st_size / (1024 * 1024)
+        if size_mb < max_mb:
+            return False
+        for i in range(keep - 1, 0, -1):
+            src = log_path.with_suffix(log_path.suffix + f".{i}")
+            dst = log_path.with_suffix(log_path.suffix + f".{i+1}")
+            if src.exists():
+                try:
+                    if dst.exists():
+                        dst.unlink()
+                    src.rename(dst)
+                except OSError:
+                    pass
+        rotated = log_path.with_suffix(log_path.suffix + ".1")
+        try:
+            if rotated.exists():
+                rotated.unlink()
+            log_path.rename(rotated)
+            log_path.touch()
+            return True
+        except OSError as e:
+            _atom_debug_error("log_rotation:rename", e)
+            return False
+    except Exception as e:
+        _atom_debug_error("log_rotation", e)
+        return False
+
+
+# ─── Path Helpers (was wg_paths.py) ──────────────────────────────────────────
+
+
+def cwd_to_project_slug(cwd: str) -> str:
+    """Convert CWD to Claude Code project slug. All-lowercase to avoid C: vs c: slug split."""
+    slug = cwd.replace(":", "-").replace("\\", "-").replace("/", "-").replace(".", "-")
+    return slug.lower()
+
+
+def find_project_root(cwd: str) -> Optional[Path]:
+    """Walk up from CWD to find project root via .claude/memory/MEMORY.md / _AIDocs / .git / .svn."""
+    if not cwd:
+        return None
+    p = Path(cwd)
+    for _ in range(4):
+        if (p / ".claude" / "memory" / MEMORY_INDEX).exists():
+            return p
+        if (p / "_AIDocs").is_dir():
+            return p
+        if (p / ".git").exists() or (p / ".svn").exists():
+            return p
+        parent = p.parent
+        if parent == p:
+            break
+        p = parent
+    return Path(cwd)
+
+
+def _is_under_claude_dir(cwd: str) -> bool:
+    """cwd 是否在 ~/.claude（含本身）之下 — V5+ local-realm 注入閘門用。
+
+    用 resolved parents 比對（非 startswith），避免 `~/.claude-foo` 之類旁系路徑
+    被誤判為內部。對拍 server.js:resolveMemDir 的 isUnderClaudeDir（語意一致；
+    JS 端以 startswith+sep 達同效）。resolve 失敗 → False（保守：當外部專案，
+    寧可少注入 local 也不誤注入到外部）。
+    """
+    if not cwd:
+        return False
+    try:
+        c = Path(cwd).resolve()
+        cd = CLAUDE_DIR.resolve()
+    except (OSError, ValueError):
+        return False
+    return c == cd or cd in c.parents
+
+
+def get_project_memory_dir(cwd: str) -> Optional[Path]:
+    """Get project-level memory dir. New path ({project_root}/.claude/memory/) preferred."""
+    if not cwd:
+        return None
+    root = find_project_root(cwd)
+    if root:
+        try:
+            if root.resolve() == CLAUDE_DIR.resolve():
+                return MEMORY_DIR
+        except OSError:
+            pass
+        new_mem = root / ".claude" / "memory"
+        if new_mem.is_dir():
+            if (new_mem / MEMORY_INDEX).exists():
+                return new_mem
+            if any((new_mem / d).is_dir() for d in ("shared", "roles", "personal")):
+                return new_mem
+    slug = cwd_to_project_slug(cwd)
+    old_mem = CLAUDE_DIR / "projects" / slug / "memory"
+    if old_mem.exists():
+        return old_mem
+    return None
+
+
+def get_scope_dir(
+    scope: str,
+    cwd: str,
+    user: Optional[str] = None,
+    role: Optional[str] = None,
+) -> Optional[Path]:
+    """V4: 回傳指定 scope 的目錄，必要時自動建立。"""
+    if scope == "global":
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        return MEMORY_DIR
+
+    if scope == "role" and not role:
+        return None
+    if scope == "personal" and not user:
+        return None
+    if scope not in ("shared", "role", "personal"):
+        return None
+
+    root = find_project_root(cwd)
+    if not root:
+        return None
+    try:
+        if root.resolve() == CLAUDE_DIR.resolve():
+            return None
+    except OSError:
+        pass
+    has_marker = (
+        (root / ".claude" / "memory" / MEMORY_INDEX).exists()
+        or (root / "_AIDocs").is_dir()
+        or (root / ".git").exists()
+        or (root / ".svn").exists()
+    )
+    if not has_marker:
+        return None
+
+    base = root / ".claude" / "memory"
+    if scope == "shared":
+        target = base / "shared"
+    elif scope == "role":
+        target = base / "roles" / role
+    else:
+        target = base / "personal" / user
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def get_project_claude_dir(cwd: str) -> Optional[Path]:
+    root = find_project_root(cwd)
+    if root:
+        d = root / ".claude"
+        if d.is_dir() and (d / "memory" / MEMORY_INDEX).exists():
+            return d
+    return None
+
+
+def get_transcript_path(session_id: str, cwd: str) -> Optional[Path]:
+    """Locate session transcript JSONL. Claude Code-managed path."""
+    if not session_id or not cwd:
+        return None
+    slug = cwd_to_project_slug(cwd)
+    candidate = CLAUDE_DIR / "projects" / slug / f"{session_id}.jsonl"
+    return candidate if candidate.exists() else None
+
+
+def resolve_episodic_dir(cwd: str) -> Tuple[Path, str]:
+    mem = get_project_memory_dir(cwd)
+    if mem:
+        return mem / "episodic", f"project:{cwd_to_project_slug(cwd)}"
+    return EPISODIC_DIR, "global"
+
+
+def resolve_failures_dir(cwd: str) -> Path:
+    mem = get_project_memory_dir(cwd)
+    if mem:
+        d = mem / "failures"
+        d.mkdir(exist_ok=True)
+        return d
+    return MEMORY_DIR / "failures"
+
+
+def resolve_staging_dir(cwd: str) -> Path:
+    mem = get_project_memory_dir(cwd)
+    if mem:
+        d = mem / "_staging"
+        d.mkdir(exist_ok=True)
+        return d
+    return MEMORY_DIR / "_staging"
+
+
+def resolve_access_json(atom_name: str, atom_path: Path) -> Path:
+    return atom_path.parent / f"{atom_name}.access.json"
+
+
+# ─── Project Registry ────────────────────────────────────────────────────────
+
+
+def _today() -> str:
+    return date.today().isoformat()
+
+
+def _load_registry() -> Dict[str, Any]:
+    if REGISTRY_PATH.exists():
+        try:
+            return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"projects": {}}
+
+
+def _save_registry(reg: Dict[str, Any]) -> None:
+    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = REGISTRY_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(reg, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(REGISTRY_PATH)
+
+
+def register_project(cwd: str) -> None:
+    root = find_project_root(cwd)
+    if not root:
+        return
+    has_marker = (
+        (root / ".claude" / "memory" / MEMORY_INDEX).exists()
+        or (root / "_AIDocs").is_dir()
+        or (root / ".git").exists()
+        or (root / ".svn").exists()
+    )
+    if not has_marker:
+        return
+    slug = cwd_to_project_slug(str(root))
+    reg = _load_registry()
+    entry = reg.setdefault("projects", {}).setdefault(slug, {})
+    entry["root"] = str(root)
+    entry["last_seen"] = _today()
+    _save_registry(reg)
+
+
+def get_slug_pointer_path(cwd: str) -> Path:
+    slug = cwd_to_project_slug(cwd)
+    return CLAUDE_DIR / "projects" / slug / "memory" / MEMORY_INDEX
+
+
+# per-process memoize：同一 hook 行程內多次 discover（UPS 跨專案掃描 + 截斷
+# fallback roots 等）只實掃一次。簽章 = registry 檔 + projects/ 目錄的
+# (path, mtime)——任一變動（登錄新專案 / 新增專案夾）即失效重掃。
+# hook 行程 per-event 短命，cache 生命週期即單次 hook 呼叫，無跨 prompt 過期問題。
+_DISCOVER_CACHE: Optional[Tuple[tuple, List[Tuple[str, Path]]]] = None
+
+
+def _discover_signature() -> tuple:
+    def _mt(p: Path) -> int:
+        try:
+            return p.stat().st_mtime_ns
+        except OSError:
+            return 0
+    reg = REGISTRY_PATH
+    projects = CLAUDE_DIR / "projects"
+    return (str(reg), _mt(reg), str(projects), _mt(projects))
+
+
+def discover_all_project_memory_dirs() -> List[Tuple[str, Path]]:
+    """Discover all project memory directories. Registry-first + old-path fallback.
+
+    Per-process memoized（見 _DISCOVER_CACHE）；回傳 list 為淺拷貝，caller 可安全變異。
+    """
+    global _DISCOVER_CACHE
+    sig = _discover_signature()
+    if _DISCOVER_CACHE is not None and _DISCOVER_CACHE[0] == sig:
+        return list(_DISCOVER_CACHE[1])
+    results = _discover_all_project_memory_dirs_uncached()
+    _DISCOVER_CACHE = (sig, list(results))
+    return results
+
+
+def _discover_all_project_memory_dirs_uncached() -> List[Tuple[str, Path]]:
+    # 全域記憶目錄不得被當「專案記憶」回傳：registry 若有 root=家目錄 的條目
+    # （root/.claude/memory == 全域 MEMORY_DIR），cross-project 掃描會把全域 atom
+    # 再補進候選一次造成同 atom 雙注入。
+    try:
+        _global_mem = MEMORY_DIR.resolve()
+    except OSError:
+        _global_mem = MEMORY_DIR
+
+    def _is_global_mem(mem: Path) -> bool:
+        try:
+            return mem.resolve() == _global_mem
+        except OSError:
+            return False
+
+    def _has_atom_index_marker(mem: Path) -> bool:
+        # CC harness 原生 file-based memory（projects/<slug>/memory/）也自建 MEMORY.md
+        # （`- [Title](file.md) — hook` 清單），與 atom 索引撞名。辨識依據：
+        # atom 索引必有 _atom_index.json / _ATOM_INDEX.md，或 MEMORY.md 含
+        # 「| Atom」trigger 表頭 / migrated-v2.21 slug-pointer stub（get_slug_pointer_path）。
+        if (mem / "_atom_index.json").exists() or (mem / ATOM_INDEX).exists():
+            return True
+        idx = mem / MEMORY_INDEX
+        if not idx.is_file():
+            return False
+        try:
+            text = idx.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            return False
+        return "| Atom" in text or "|Atom" in text or "Status: migrated-v2.21" in text
+
+    seen_slugs: set = set()
+    results: List[Tuple[str, Path]] = []
+    reg = _load_registry()
+    for slug, info in reg.get("projects", {}).items():
+        root = Path(info.get("root", ""))
+        if not root.is_dir():
+            continue
+        new_mem = root / ".claude" / "memory"
+        if new_mem.is_dir() and (new_mem / MEMORY_INDEX).exists():
+            if not _is_global_mem(new_mem):
+                results.append((slug, new_mem))
+            seen_slugs.add(slug)
+            continue
+        old_mem = CLAUDE_DIR / "projects" / slug / "memory"
+        if old_mem.is_dir():
+            # registry old-path 同樣要過 atom marker：harness 原生 memory dir 與
+            # 此路徑完全重合。
+            if not _is_global_mem(old_mem) and _has_atom_index_marker(old_mem):
+                results.append((slug, old_mem))
+            seen_slugs.add(slug)
+    projects_dir = CLAUDE_DIR / "projects"
+    if projects_dir.is_dir():
+        for proj_dir in sorted(projects_dir.iterdir()):
+            if not proj_dir.is_dir():
+                continue
+            slug = proj_dir.name
+            if slug in seen_slugs:
+                continue
+            mem = proj_dir / "memory"
+            # 要求 atom 索引 marker 才納入。MEMORY.md 僅存在不夠——
+            # 新版 CC harness file-based memory 也在此路徑自建 MEMORY.md，
+            # 需內容辨識（_has_atom_index_marker）區分兩套系統。
+            if mem.is_dir() and not _is_global_mem(mem) and _has_atom_index_marker(mem):
+                results.append((slug, mem))
+    return results
+
+
+def discover_v4_sublayers(slug: str, mem_dir: Path) -> List[Tuple[str, Path, str]]:
+    """V4: enumerate sub scope layers under a project memory dir."""
+    out: List[Tuple[str, Path, str]] = []
+    shared_label = f"shared:{slug}"
+
+    def _is_legacy_atom(p: Path) -> bool:
+        if not (p.is_file() and p.suffix == ".md"):
+            return False
+        if p.name in (MEMORY_INDEX, ATOM_INDEX):
+            return False
+        if p.name.startswith("_") or p.name.startswith("SPEC_"):
+            return False
+        return True
+    has_flat_legacy = any(_is_legacy_atom(p) for p in mem_dir.iterdir()) if mem_dir.is_dir() else False
+    if has_flat_legacy:
+        out.append((shared_label, mem_dir, "flat-legacy"))
+
+    shared_dir = mem_dir / "shared"
+    if shared_dir.is_dir():
+        out.append((shared_label, shared_dir, "recursive"))
+
+    roles_root = mem_dir / "roles"
+    if roles_root.is_dir():
+        for rd in sorted(roles_root.iterdir()):
+            if rd.is_dir() and not rd.name.startswith("_"):
+                out.append((f"role:{slug}:{rd.name}", rd, "recursive"))
+
+    personal_root = mem_dir / "personal"
+    if personal_root.is_dir():
+        for pd in sorted(personal_root.iterdir()):
+            if pd.is_dir() and not pd.name.startswith("_"):
+                out.append((f"personal:{slug}:{pd.name}", pd, "recursive"))
+
+    return out
+
+
+def discover_memory_layers(
+    layer_filter: Optional[str] = None,
+    user: Optional[str] = None,
+    role: Optional[str] = None,
+) -> List[Tuple[str, Path]]:
+    """Discover memory layers with optional role filter (SPEC §8.1)."""
+    layers: List[Tuple[str, Path]] = []
+
+    def _accept(label: str) -> bool:
+        if not layer_filter or layer_filter == "all":
+            return True
+        if layer_filter == label:
+            return True
+        if layer_filter == "global":
+            return label == "global"
+        if layer_filter == "shared":
+            return label.startswith("shared:")
+        if layer_filter == "role":
+            return label.startswith("role:")
+        if layer_filter.startswith("role:") and ":" not in layer_filter[5:]:
+            r = layer_filter.split(":", 1)[1]
+            return label.startswith("role:") and label.endswith(f":{r}")
+        if layer_filter == "personal":
+            return label.startswith("personal:")
+        if layer_filter.startswith("personal:") and ":" not in layer_filter[9:]:
+            u = layer_filter.split(":", 1)[1]
+            return label.startswith("personal:") and label.endswith(f":{u}")
+        return False
+
+    if _accept("global"):
+        layers.append(("global", MEMORY_DIR))
+
+    role_set = set()
+    if role:
+        role_set = {r.strip() for r in role.split(",") if r.strip()}
+
+    user_aware = bool(user or role)
+
+    for slug, mem_dir in discover_all_project_memory_dirs():
+        for label, path, _kind in discover_v4_sublayers(slug, mem_dir):
+            if user_aware:
+                if label.startswith("shared:"):
+                    pass
+                elif label.startswith("role:"):
+                    r = label.rsplit(":", 1)[1]
+                    if r not in role_set:
+                        continue
+                elif label.startswith("personal:"):
+                    u = label.rsplit(":", 1)[1]
+                    if u != user:
+                        continue
+            if not _accept(label):
+                continue
+            layers.append((label, path))
+
+    return layers
+
+
+def state_file_path(session_id: str) -> Path:
+    return WORKFLOW_DIR / f"state-{session_id}.json"
 
 
 # ─── State File I/O ──────────────────────────────────────────────────────────
 
 
 def state_path(session_id: str) -> Path:
-    """Alias for wg_paths.state_file_path (backward compat)."""
+    """Alias kept for backward compat with callers."""
     return state_file_path(session_id)
 
 
 def read_state(session_id: str) -> Optional[Dict[str, Any]]:
-    """Read state file. Returns None if not found or corrupt."""
     path = state_path(session_id)
     if not path.exists():
         return None
@@ -119,19 +669,18 @@ def read_state(session_id: str) -> Optional[Dict[str, Any]]:
 
 
 def write_state(session_id: str, state: Dict[str, Any]) -> None:
-    """Atomic write with advisory lock to prevent concurrent R-M-W races (C6).
-
-    Uses msvcrt.locking on Windows for advisory file locking (best-effort):
-    if lock acquisition fails, proceeds without lock — tmp+replace still
-    provides crash safety.
-    """
+    """Atomic write with advisory lock to prevent concurrent R-M-W races."""
     WORKFLOW_DIR.mkdir(parents=True, exist_ok=True)
+
+    canonical_id = state.get("session", {}).get("id")
+    if canonical_id and canonical_id != session_id:
+        session_id = canonical_id
+
     state["last_updated"] = _now_iso()
     path = state_path(session_id)
     tmp_path = path.with_suffix(".tmp")
     lock_path = path.with_suffix(".lock")
 
-    # Advisory lock (Windows only, best-effort)
     lock_fh = None
     if sys.platform == "win32":
         try:
@@ -141,7 +690,7 @@ def write_state(session_id: str, state: Dict[str, Any]) -> None:
         except OSError:
             if lock_fh:
                 lock_fh.close()
-            lock_fh = None  # Failed to acquire — proceed without lock
+            lock_fh = None
 
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -168,7 +717,6 @@ def write_state(session_id: str, state: Dict[str, Any]) -> None:
 
 
 def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
-    """Create a fresh state object."""
     return {
         "schema_version": "1.1",
         "session": {
@@ -184,7 +732,6 @@ def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
         "knowledge_queue": [],
         "sync_pending": False,
         "stop_blocked_count": 0,
-        "remind_count": 0,
         "topic_tracker": {
             "intent_distribution": {},
             "prompt_count": 0,
@@ -197,20 +744,133 @@ def new_state(session_id: str, cwd: str, source: str) -> Dict[str, Any]:
     }
 
 
+def _find_active_sibling_state(
+    cwd: str, current_session_id: str, window_seconds: int = 60
+) -> Optional[Dict[str, Any]]:
+    """SessionStart 去重：同 cwd + 近期活躍的兄弟 state。"""
+    try:
+        norm_cwd = cwd.lower().replace("\\", "/")
+        best: Optional[Dict[str, Any]] = None
+        best_mtime: float = 0.0
+        now = datetime.now(timezone.utc).astimezone()
+
+        for fp in WORKFLOW_DIR.glob("state-*.json"):
+            if current_session_id in fp.name:
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    candidate = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            candidate_cwd = candidate.get("session", {}).get("cwd", "")
+            if candidate_cwd.lower().replace("\\", "/") != norm_cwd:
+                continue
+
+            if candidate.get("phase") != "working":
+                continue
+            if candidate.get("merged_into"):
+                continue
+
+            started_at_str = candidate.get("session", {}).get("started_at", "")
+            if not started_at_str:
+                continue
+            try:
+                started_at = datetime.fromisoformat(started_at_str)
+                delta = (now - started_at).total_seconds()
+                if delta < 0 or delta > window_seconds:
+                    continue
+            except (ValueError, TypeError):
+                continue
+
+            mtime = fp.stat().st_mtime
+            if mtime > best_mtime:
+                best = candidate
+                best_mtime = mtime
+
+        return best
+    except Exception as e:
+        _atom_debug_error("state:sibling_scan", e)
+        return None
+
+
+def _rebuild_min_atom_index(cwd: str) -> Dict[str, Any]:
+    """Fallback state 用最小 atom_index 重建（SessionStart 完整版的廉價子集）。
+
+    復用 session_start 同一套原料：parse_memory_index(global) + realm 過濾 +
+    專案層 index。不含 V4 role sublayer / AIDocs（那些需要 role bootstrap，
+    fallback 場景成本不划算）。失敗回 {}（caller 保持無 index、advisory 仍浮出）。
+    """
+    try:
+        from wg_atoms import parse_memory_index  # lazy：避免模組層循環 import
+        global_atoms = parse_memory_index(MEMORY_DIR)
+        if is_local_realm_path is not None and not _is_under_claude_dir(cwd):
+            global_atoms = [
+                (n, p, t) for (n, p, t) in global_atoms
+                if not is_local_realm_path(p) or is_cross_project_local(p)
+            ]
+        project_mem_dir = get_project_memory_dir(cwd)
+        project_atoms = parse_memory_index(project_mem_dir) if project_mem_dir else []
+        project_root = find_project_root(cwd)
+        return {
+            "global": [(n, p, t) for n, p, t in global_atoms],
+            "project": [(n, p, t) for n, p, t in project_atoms],
+            "project_memory_dir": str(project_mem_dir) if project_mem_dir else "",
+            "project_root": str(project_root) if project_root else "",
+        }
+    except Exception as e:
+        _atom_debug_error("state:min_index_rebuild", e)
+        return {}
+
+
 def _ensure_state(
     session_id: str, input_data: Dict[str, Any], config: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """Read state; if missing (SessionStart was skipped), auto-create one."""
     state = read_state(session_id)
     if state:
+        merged_into = state.get("merged_into")
+        if merged_into:
+            target = read_state(merged_into)
+            if target:
+                return target
+            state.pop("merged_into", None)
+            state["phase"] = "working"
+            write_state(session_id, state)
+            _atom_debug_log(
+                "MergeSelfHeal",
+                f"{session_id[:12]}… merged_into={merged_into[:12]}… target missing "
+                f"→ self-heal to active",
+                config,
+            )
         return state
+
     cwd = input_data.get("cwd", "")
+
+    sibling = _find_active_sibling_state(cwd, session_id, window_seconds=86400)
+    if sibling:
+        real_id = sibling.get("session", {}).get("id", "")
+        _atom_debug_log(
+            "Fallback→Sibling",
+            f"{session_id[:12]}… → existing {real_id[:12] if real_id else '?'}…",
+            config,
+        )
+        return sibling
+
     state = new_state(session_id, cwd, "fallback")
     state["phase"] = "working"
+    # 無 atom_index 的 fallback state 會讓本 session 餘生 trigger/BM25 全空——
+    # 重建最小 index + 標 advisory（UPS 消費注入一行，可觀測性鐵律：不得靜默降級）。
+    min_index = _rebuild_min_atom_index(cwd)
+    if min_index:
+        state["atom_index"] = min_index
+    state["_fallback_state_rebuilt"] = True
     write_state(session_id, state)
     _atom_debug_log(
         "Fallback",
-        f"SessionStart missed for {session_id[:12]}… — auto-created state",
+        f"SessionStart missed for {session_id[:12]}… — auto-created state "
+        f"(min atom_index: global={len(min_index.get('global', []))} "
+        f"project={len(min_index.get('project', []))})",
         config,
     )
     return state
@@ -220,28 +880,62 @@ def _ensure_state(
 
 
 def output_json(data: Dict[str, Any]) -> None:
-    """Print JSON to stdout and exit 0."""
     print(json.dumps(data, ensure_ascii=False))
     sys.exit(0)
 
 
 def output_nothing() -> None:
-    """Exit 0 with no output (fast path)."""
     sys.exit(0)
 
 
 def output_block(reason: str) -> None:
-    """Output a block decision (for Stop hook)."""
     output_json({"decision": "block", "reason": reason})
+
+
+# ─── Promotion Audit Log ─────────────────────────────────────────────────────
+
+
+def log_promotion_audit(action: str, atom: str, **fields: Any) -> None:
+    """Append one JSONL entry to memory/_promotion_audit.jsonl."""
+    try:
+        entry = {"ts": datetime.now().isoformat(timespec="seconds"),
+                 "action": action, "atom": atom}
+        entry.update(fields)
+        audit_path = MEMORY_DIR / "_promotion_audit.jsonl"
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        _atom_debug_error("promotion:audit_append", e)
+
+
+# ─── Guard Trigger Log（可觀測性：各護欄觸發計數 JSONL）─────────────────────
+
+GUARD_LOG_DIR = Path.home() / ".claude" / "Logs"
+
+
+def append_guard_log(guard: str, payload: Dict[str, Any]) -> None:
+    """護欄觸發事件落一行 JSONL 到 Logs/guard-<guard>.jsonl（含時間戳+觸發摘要）。
+
+    用途：量測誤攔率——evasion / docdrift / lang 等 fail-open 護欄過去只進
+    stderr（不可稽核），本 log 供事後統計觸發頻率與內容分布。
+    每護欄獨立檔＝多 Stop hook 並行時無同檔競寫。fail-open。"""
+    try:
+        GUARD_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = GUARD_LOG_DIR / f"guard-{guard}.jsonl"
+        rotate_log_if_oversized(log_path, max_mb=5, keep=2)
+        entry = {"at": _now_iso()}
+        entry.update(payload)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        _atom_debug_error(f"guard_log:{guard}", e)
 
 
 # ─── Atom Debug Log ──────────────────────────────────────────────────────────
 
 
 def _atom_debug_log(tag: str, content: str, config: Dict[str, Any] = None) -> None:
-    """Write to atom-debug.log when atom_debug flag is on.
-    For ERROR tag, always write regardless of flag.
-    Skips empty/NONE entries to reduce noise."""
+    """Write to atom-debug.log when atom_debug flag is on. ERROR always writes."""
     if tag != "ERROR" and not (config or {}).get("atom_debug", False):
         return
     if not content or not content.strip():
@@ -267,3 +961,317 @@ def _atom_debug_error(source: str, exc: Exception) -> None:
         if "NoneType" in msg:
             msg = f"{type(exc).__name__}: {exc}"
     _atom_debug_log("ERROR", f"[{source}] {msg}", {"atom_debug": True})
+
+
+# ─── PreToolUse Path / Command Guards (was wg_pretool_guards.py) ─────────────
+
+_PROJECT_MEMORY_PATH_RE = re.compile(
+    r"[/\\]\.claude[/\\]projects[/\\](?!_)[^/\\]+[/\\]memory[/\\]",
+    re.IGNORECASE,
+)
+_NESTED_PROJECTS_RE = re.compile(
+    r"[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]projects[/\\][^/\\]+[/\\]memory[/\\]",
+    re.IGNORECASE,
+)
+_DOUBLE_CLAUDE_RE = re.compile(
+    r"[/\\]\.claude[/\\]\.claude[/\\]memory[/\\]",
+    re.IGNORECASE,
+)
+_SVN_COMMIT_RE = re.compile(r"\bsvn\s+(?:ci|commit)\b", re.IGNORECASE)
+_TEST_PATH_RE = re.compile(
+    r"(?:^|[/\\\s])(?:tests?|__tests__)(?:[/\\\s]|$)"
+    r"|[/\\][^/\\\s]*Test\.(?:cs|py|js|ts|tsx|jsx|go|java)\b",
+    re.IGNORECASE,
+)
+
+_WHITELIST_BASENAMES = frozenset({
+    "MEMORY.md", "_ATOM_INDEX.md", "_CHANGELOG.md", "_CHANGELOG_ARCHIVE.md",
+    "_roles.md", "atom_io_audit.jsonl",
+    "_promotion_audit.jsonl", "project-registry.json", "session_score.json",
+    "DESIGN.md", "role.md",
+})
+if atom_writable_dir_segments is not None:
+    _WHITELIST_DIR_SEGMENTS = atom_writable_dir_segments()
+else:
+    # Fallback（lib import 失敗的極端情況；與 atom_locations 保持一致）。
+    # 不含 'Failures'：Failures atom 由 _is_failures_atom_path 主動 gate，非白名單豁免。
+    _WHITELIST_DIR_SEGMENTS = frozenset({
+        "_meta", "_staging", "_archived", "_distant", "_reference", "_pending_review",
+        "_vectordb", "_rejected", "templates", "episodic", "wisdom", "personal",
+    })
+
+
+def _path_under_memory_dir(fp: Path) -> bool:
+    parts = [p.lower() for p in fp.parts]
+    for i in range(len(parts) - 1):
+        if parts[i] == ".claude" and parts[i + 1] == "memory":
+            return True
+    return False
+
+
+def _atom_path_whitelisted(fp: Path) -> bool:
+    if fp.name in _WHITELIST_BASENAMES:
+        return True
+    if fp.name.startswith("_") or fp.name.startswith("SPEC_"):
+        return True
+    parts_lower = {p.lower() for p in fp.parts}
+    if parts_lower & _WHITELIST_DIR_SEGMENTS:
+        return True
+    return False
+
+
+def _is_failures_atom_path(fp: Path) -> bool:
+    """fp 是否為 `_AIDocs/Failures/` 下「已註冊的 atom」(.md)。
+
+    `_AIDocs/Failures/` 不在 `.claude/memory/` 樹下，故上游 _path_under_memory_dir
+    對其早 return None —— 這正是 funnel guard 的覆蓋缺口（feedback-* / cognitive-patterns
+    / memory-pipeline-* 等失敗 atom 物理居此，直接 Write/Edit 會繞過 funnel + audit）。
+
+    該目錄混居「註冊 atom」與「legacy 失敗筆記」（env-traps / silent-failures /
+    wrong-assumptions… 未進 index，屬一般參考文件，不可誤擋），故以 failures_atom_stems()
+    （index SoT）精準比對 stem。_INDEX.md（'_' 前綴）與 legacy 文件 stem 不在 index → 自然放行。
+
+    failures_atom_stems 在 lib import 失敗時為 None → 退化為「不攔」，與既有行為一致。
+    """
+    if failures_atom_stems is None or fp.suffix != ".md":
+        return False
+    parts_lower = [p.lower() for p in fp.parts]
+    for i in range(len(parts_lower) - 1):
+        if parts_lower[i] == "_aidocs" and parts_lower[i + 1] == "failures":
+            break
+    else:
+        return False
+    try:
+        return fp.stem in failures_atom_stems()
+    except Exception as e:
+        _atom_debug_error("guard:failures_atom_path", e)
+        return False
+
+
+def check_memory_path_block(
+    tool_name: str, tool_input: Dict[str, Any]
+) -> Optional[str]:
+    """阻擋三類 memory 違規寫入：projects/{slug}/memory / 雙層 .claude / atom 直 Write。"""
+    if tool_name not in ("Write", "Edit"):
+        return None
+    fp_str = tool_input.get("file_path", "") or ""
+    if not fp_str:
+        return None
+
+    if _PROJECT_MEMORY_PATH_RE.search(fp_str) or _NESTED_PROJECTS_RE.search(fp_str):
+        return (
+            "[Guardian:MemoryPathBlock] 禁止寫入 `~/.claude/projects/{slug}/memory/`。"
+            "原子記憶專案自治層已覆寫此路徑。\n"
+            "正確做法：(1) 全域記憶 → 用 MCP `atom_write` (scope=global) 寫到 "
+            "~/.claude/memory/；(2) 專案記憶 → 用 MCP `atom_write` "
+            "(scope=shared/role/personal) 寫到 {project_root}/.claude/memory/。\n"
+            "詳見 _AIDocs/Failures/feedback-memory-system-doc-sync.md。"
+        )
+
+    if _DOUBLE_CLAUDE_RE.search(fp_str):
+        return (
+            "[Guardian:DoubleClaudeBlock] 禁止寫入 `~/.claude/.claude/memory/` 雙層路徑。"
+            "這是雙層 bug 的殘骸 — 應寫到 `~/.claude/memory/`。"
+        )
+
+    if os.environ.get("WG_DISABLE_ATOM_GUARD") == "1":
+        return None
+    fp = Path(fp_str)
+    # memory/ 樹下 atom，或 _AIDocs/Failures/ 下「註冊 atom」(feedback-* 等失敗 atom)
+    # 皆須走 funnel；後者不在 memory 樹下，需 _is_failures_atom_path 補攔（覆蓋缺口）。
+    if not _path_under_memory_dir(fp) and not _is_failures_atom_path(fp):
+        return None
+    if fp.suffix != ".md":
+        return None
+    if _atom_path_whitelisted(fp):
+        return None
+    return (
+        "[Guardian:AtomFunnelBlock] 直接 Write/Edit atom .md 不走 funnel 被禁止。\n"
+        f"路徑：{fp_str}\n"
+        "正確做法：\n"
+        "  (1) 用 MCP `atom_write` / `atom_promote` / `atom_move` 工具；\n"
+        "      只改 Trigger/Related/Tags 元資料 → `atom_edit_meta`（外科編輯，byte-stable）\n"
+        "  (2) 程式碼端：知識內容寫 lib.atom_io.write_atom() / write_raw() / edit_metadata()；\n"
+        "      計數欄位（read_hits / last_used / confirmations）寫 lib.atom_access\n"
+        "緊急 bypass：set 環境變數 `WG_DISABLE_ATOM_GUARD=1` 後重試。"
+    )
+
+
+def check_svn_test_block(
+    tool_name: str, tool_input: Dict[str, Any]
+) -> Optional[str]:
+    """阻擋 svn commit 含 test/tests/__tests__ 路徑或 *Test.<ext> 檔。"""
+    if tool_name != "Bash":
+        return None
+    cmd = tool_input.get("command", "") or ""
+    if not _SVN_COMMIT_RE.search(cmd):
+        return None
+    if not _TEST_PATH_RE.search(cmd):
+        return None
+    return (
+        "[Guardian:SvnTestBlock] svn commit 命令含 test/tests/__tests__ 路徑或 "
+        "*Test.<ext> 檔案。測試/練習/新手作業檔不可上 SVN（r10854 教訓）。\n"
+        "若確實要上，請 (1) 將指定檔案逐一列入命令、不用 glob；或 "
+        "(2) 由使用者明確指示後再執行。"
+    )
+
+
+# ─── Cross-Realm Write Guard ──────────────
+# 守門對象：~/.claude 核心層（skills/tools/hooks/lib/rules 子目錄 + 根層敏感檔
+# settings.json/CLAUDE.md/IDENTITY*.md/USER*.md）+ Bash `claude mcp add/remove`
+# 全域 scope 操作。判別子＝session cwd：外部專案 session → deny（跨層污染
+# 教訓）；~/.claude 自身的開發 session 完全不受影響。deterministic、零 LLM。
+
+_CORE_GUARDED_SUBDIRS = ("skills", "tools", "hooks", "lib", "rules")
+_CORE_GUARDED_ROOT_FILES = ("settings.json", "claude.md", "user.md")  # lower
+_MCP_MUTATE_RE = re.compile(
+    r"\bclaude(?:\.exe|\.cmd)?\s+mcp\s+(add(?:-json|-from-claude-desktop)?|remove)\b",
+    re.IGNORECASE,
+)
+_MCP_SCOPE_USER_RE = re.compile(r"(?:-s|--scope)[\s=]+user\b", re.IGNORECASE)
+_MCP_SCOPE_PROJECT_LOCAL_RE = re.compile(
+    r"(?:-s|--scope)[\s=]+(?:project|local)\b", re.IGNORECASE)
+
+
+def _is_core_session(cwd: str) -> Optional[bool]:
+    """cwd 是否落在 ~/.claude 下。None＝無法判定（caller fail-open）。"""
+    if not cwd:
+        return None
+    home_claude = (Path.home() / ".claude").resolve()
+    try:
+        cwd_p = Path(cwd).resolve()
+    except (OSError, ValueError):
+        return None
+    return cwd_p == home_claude or home_claude in cwd_p.parents
+
+
+def _is_root_sensitive_name(name_lower: str) -> bool:
+    return (
+        name_lower in _CORE_GUARDED_ROOT_FILES
+        or (name_lower.startswith("identity") and name_lower.endswith(".md"))
+        or (name_lower.startswith("user-") and name_lower.endswith(".md"))
+    )
+
+
+def check_cross_realm_write(
+    tool_name: str, tool_input: Dict[str, Any], cwd: str,
+    config: Dict[str, Any],
+) -> Optional[str]:
+    """外部專案 session 寫入 ~/.claude 核心層 → deny。cwd 缺失 fail-open。"""
+    if tool_name not in ("Write", "Edit", "NotebookEdit"):
+        return None
+    g = (config.get("guard") or {}).get("cross_realm_write") or {}
+    if not g.get("enabled", True):
+        return None
+    # NotebookEdit 的路徑欄位是 notebook_path
+    fp_str = tool_input.get("file_path", "") or tool_input.get("notebook_path", "") or ""
+    if not fp_str or not cwd:
+        return None
+    home_claude = (Path.home() / ".claude").resolve()
+    try:
+        fp = Path(fp_str).resolve()
+        rel = fp.relative_to(home_claude)
+    except (OSError, ValueError):
+        return None  # 目標不在 ~/.claude 下 → 與本閘無關
+    if not rel.parts:
+        return None
+    top = rel.parts[0].lower()
+    is_core_subdir = top in _CORE_GUARDED_SUBDIRS
+    # v1.1 ①：根層敏感檔（settings.json 可注入任意 hook 指令，比 skills 更敏感）
+    is_root_sensitive = len(rel.parts) == 1 and _is_root_sensitive_name(top)
+    if not is_core_subdir and not is_root_sensitive:
+        return None
+    if _is_core_session(cwd) is not False:
+        return None  # 核心開發 session 放行；無法判定 → fail-open
+    fp_norm = str(fp).replace("\\", "/").lower()
+    for pat in g.get("allowlist", []) or []:
+        if pat and str(pat).replace("\\", "/").lower() in fp_norm:
+            return None
+    target_desc = (
+        f"~/.claude/{rel.parts[0]}/" if is_core_subdir
+        else f"核心根層敏感檔 ~/.claude/{rel.parts[0]}"
+    )
+    return (
+        f"[Guardian:CrossRealmWriteBlock] 偵測到外部專案 session 寫入核心層 "
+        f"{target_desc}。\n"
+        f"路徑：{fp_str}\n"
+        f"session cwd：{cwd}\n"
+        "核心層（skills/tools/hooks/lib/rules + settings.json/CLAUDE.md/"
+        "IDENTITY*.md/USER*.md）只接受 ~/.claude session 的修改。\n"
+        "正確做法：\n"
+        "  (1) 專案專屬 skill/tool → 寫到 {專案根}/.claude/skills/ 或 "
+        ".claude/tools/（Claude Code 原生支援專案層疊加）\n"
+        "  (2) 暫存產物（截圖/log/dump）→ 寫到專案目錄或系統 temp\n"
+        "  (3) user 明確要求改核心層 → 請在 ~/.claude 開 session 操作，或於 "
+        "workflow/config.json guard.cross_realm_write.allowlist 加入路徑"
+    )
+
+
+def check_cross_realm_mcp_cmd(
+    tool_name: str, tool_input: Dict[str, Any], cwd: str,
+    config: Dict[str, Any],
+) -> Optional[str]:
+    """v1.1 ②：外部專案 session 的 Bash `claude mcp add/remove` 全域 scope → deny。
+
+    deny 條件：add 帶 `-s/--scope user`（寫 ~/.claude.json 全域區）、或 remove
+    未限定 `-s project|local`（可能移除全域 server）。project/local scope 放行
+    （效果限於該專案）。core session / cwd 無法判定 → fail-open。
+    """
+    if tool_name != "Bash":
+        return None
+    g = (config.get("guard") or {}).get("cross_realm_write") or {}
+    if not g.get("enabled", True):
+        return None
+    cmd = tool_input.get("command", "") or ""
+    m = _MCP_MUTATE_RE.search(cmd)
+    if not m:
+        return None
+    if _is_core_session(cwd) is not False:
+        return None
+    sub = m.group(1).lower()
+    if sub.startswith("add"):
+        if not _MCP_SCOPE_USER_RE.search(cmd):
+            return None  # 預設 local / 顯式 project|local：效果限本專案，放行
+        reason = "add 帶 `-s user`（寫入全域 ~/.claude.json mcpServers）"
+    else:  # remove
+        if _MCP_SCOPE_PROJECT_LOCAL_RE.search(cmd):
+            return None
+        reason = "remove 未限定 `-s project|local`（可能移除全域 server）"
+    return (
+        f"[Guardian:CrossRealmMcpBlock] 偵測到外部專案 session 的全域 MCP 變更：\n"
+        f"指令：{cmd[:200]}\n"
+        f"session cwd：{cwd}\n"
+        f"攔截原因：{reason}。\n"
+        "正確做法：\n"
+        "  (1) 專案要用的 MCP → `claude mcp add <name> -s project ...`"
+        "（寫專案 .mcp.json，可版控共享）\n"
+        "  (2) 確要全域註冊/移除 → 請在 ~/.claude 開 session 操作，"
+        "或 config guard.cross_realm_write.enabled=false 暫關本閘"
+    )
+
+
+# ─── MCP Server Health Check (was wg_intent._check_mcp_servers) ──────────────
+
+
+def _check_mcp_servers() -> List[str]:
+    """Verify .mcp.json server entries: command + script must exist on disk."""
+    issues: List[str] = []
+    mcp_path = CLAUDE_DIR / ".mcp.json"
+    if not mcp_path.exists():
+        return []
+    try:
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            mcp_cfg = json.loads(f.read())
+        servers = mcp_cfg.get("mcpServers", {})
+        for name, srv in servers.items():
+            cmd = srv.get("command", "")
+            args = srv.get("args", [])
+            if cmd and not Path(cmd).exists() and not shutil.which(cmd):
+                issues.append(f"{name}: command not found ({cmd})")
+            if args:
+                script = args[0]
+                if not Path(script).exists():
+                    issues.append(f"{name}: script not found ({script})")
+    except Exception as e:
+        issues.append(f"parse error: {e}")
+    return issues

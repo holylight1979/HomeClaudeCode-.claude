@@ -1,88 +1,27 @@
-# Claude Code 全域設定 — 目錄結構
+# Claude Code 全域設定 — 目錄角色說明
+> 路徑 `~/.claude/`；2026-04-28 瘦身 218→30 行；2026-06-03 校準 V5 現況（commands→skills、補 `lib/`·`workflow/`·`plugins/`·`_AIDocs/_atoms/`）；詳細跑 `tree -L 3` 或查各子目錄 `_INDEX.md`
 
-> 路徑：`C:\Users\holylight\.claude\`
+## 頂層目錄角色
+| 路徑 | 角色 | 維護來源 |
+|------|------|---------|
+| `CLAUDE.md` / `IDENTITY.md` / `USER.md` / `rules/core.md` | always-loaded 入口 | 手寫 |
+| `settings.json` / `.mcp.json` | Hook 鏈 + 權限 + MCP server | 手寫 |
+| `memory/` | 原子記憶資料層（`_atom_index.json` SoT + `MEMORY.md` 索引 + core atom md + `_vectordb/` + `wisdom/` + `_reference/` + `_staging/` + `personal/{user}/` + `shared/` + `roles/{role}/`）。feedback-*/失敗 atom 物理居 `_AIDocs/Failures/`、local 範疇 atom 居 `_AIDocs/_atoms/`（索引仍在此單一來源） | hook auto + atom_write |
+| `lib/` | atom 規則/IO 單一源（`atom_spec` / `atom_locations` / `atom_io` / `atom_access` + `verify/`） | 手寫 |
+| `hooks/` | Hook 腳本（`workflow-guardian.py` + `wg_*.py` + `wisdom_engine.py` + `handlers/` + lib） | 手寫 |
+| `skills/` | V5 全域 skills（2026-05-27 取代 `commands/`） | 手寫 |
+| `tools/` `scripts/` | 工具腳本 / 一次性遷移（含 `workflow-guardian-mcp/` server.js + world.html） | 手寫 |
+| `workflow/` | Guardian runtime 狀態 + `config.json`（多數 gitignore） | hook |
+| `_AIDocs/` | 長期參考知識（`Architecture` / `SPEC_*` / `DevHistory/` 演進史 / `Failures/` 失敗 atom / `_atoms/` local 範疇 atom） | 手寫 + auto-roll |
+| `plans/` | 進行中規劃；完成搬 `_AIDocs/DevHistory/` | 手寫 |
+| `prompts/` `templates/` | Prompt / atom 模板（`templates/icld-sprint-template.md` 由 workflow-icld atom 引用） | 手寫 |
+| `plugins/` | Claude Code plugin（MR 安裝） | 手寫 |
+| `journals/` `Logs/` | 工作日誌 / 執行日誌 | hook |
+| `projects/` | per-project session jsonl + 專案層記憶 | Claude Code |
+| `sessions/` `session-env/` `file-history/` `cache/` `ide/` `shell-snapshots/` `backups/` | Claude Code 內部狀態 | 系統 |
 
-```
-~/.claude/
-├── CLAUDE.md                    ← 全域工作流引擎指令（always-loaded）
-├── README.md                    ← 對外說明（設計哲學、流程圖、Token 對比）
-├── Install-forAI.md             ← AI 可讀安裝指南
-├── settings.json                ← Hooks + 權限設定（6 hook events）
-├── .mcp.json                    ← MCP server 設定
-├── .gitignore                   ← Git 排除規則
-│
-├── hooks/                       ← Hook 腳本
-│   ├── workflow-guardian.py     ← 統一 Hook 入口（~2285 行，處理 6 events）
-│   └── wisdom_engine.py        ← Wisdom Engine（~195 行，情境分類+反思）
-│
-├── commands/                    ← 自訂 Skills（/slash commands）
-│   ├── init-project.md          ← /init-project 知識庫初始化
-│   ├── resume.md                ← /resume 自動續接 Session
-│   ├── consciousness-stream.md  ← /consciousness-stream 識流處理
-│   ├── svn-update.md            ← /svn-update SVN 更新
-│   └── unity-yaml.md            ← /unity-yaml Unity YAML 操作
-│
-├── memory/                      ← 全域記憶層
-│   ├── MEMORY.md                ← Atom 索引（≤30 行，always-loaded）
-│   ├── preferences.md           ← [固] 使用者偏好
-│   ├── decisions.md             ← [固] 全域決策
-│   ├── excel-tools.md           ← [固] Excel 工具知識
-│   ├── workflow-rules.md        ← [固] 版本控制工作流規則
-│   ├── failures.md              ← [觀] 失敗/陷阱知識
-│   ├── toolchain.md             ← [觀] 工具鏈知識
-│   ├── SPEC_Atomic_Memory_System.md ← 原子記憶系統規格
-│   ├── wisdom/                  ← Wisdom Engine 資料
-│   │   ├── DESIGN.md            ← 設計文件
-│   │   ├── causal_graph.json    ← 因果關係有向圖
-│   │   └── reflection_metrics.json ← 反思統計
-│   ├── episodic/                ← 自動生成 session 摘要（TTL 24d，不進 git）
-│   ├── _distant/                ← 遙遠記憶區（已淘汰 atoms，不進 git）
-│   └── _vectordb/               ← LanceDB 向量索引（不進 git）
-│
-├── tools/
-│   ├── rag-engine.py            ← RAG CLI 入口
-│   ├── memory-audit.py          ← 健檢工具
-│   ├── memory-write-gate.py     ← 寫入品質閘門
-│   ├── memory-conflict-detector.py ← 衝突偵測
-│   ├── eval-ranked-search.py    ← Ranked search 評估
-│   ├── read-excel.py            ← Excel 讀取
-│   ├── test-memory-v21.py       ← 記憶系統測試
-│   ├── memory-vector-service/   ← HTTP Vector 搜尋服務
-│   │   ├── service.py           ← HTTP daemon @ :3849
-│   │   ├── indexer.py           ← 段落級索引器 (LanceDB)
-│   │   ├── searcher.py          ← 語意搜尋 + ranked search
-│   │   ├── reranker.py          ← LLM re-ranking
-│   │   ├── config.py            ← 設定管理
-│   │   └── requirements.txt
-│   └── workflow-guardian-mcp/   ← Dashboard MCP server
-│       └── server.js            ← Node.js MCP @ :3848
-│
-├── workflow/
-│   ├── config.json              ← 統一設定檔（vector_search, write_gate, response_capture, cross_session）
-│   └── state-{session-id}.json  ← Session 狀態追蹤（ephemeral，不進 git）
-│
-├── projects/                    ← 各專案的 auto-memory
-│   └── (各專案 auto-memory 目錄)
-│
-├── _AIDocs/                     ← 知識庫（本目錄）
-│   ├── _INDEX.md                ← 文件索引
-│   ├── _CHANGELOG.md            ← 變更記錄（最近 ~8 筆）
-│   ├── _CHANGELOG_ARCHIVE.md    ← 變更記錄封存
-│   ├── Architecture.md          ← 核心架構分析
-│   ├── Project_File_Tree.md     ← 目錄結構（本檔案）
-│   └── AtomicMemory-v2.1-Plan.md ← v2.1 研究計畫（歷史文件）
-│
-└── [系統目錄 — git 排除]
-    ├── cache/                   ├── backups/
-    ├── debug/                   ├── plans/
-    ├── file-history/            ├── ide/
-    ├── downloads/               ├── plugins/
-    ├── shell-snapshots/         ├── session-env/
-    ├── telemetry/               └── todos/
-```
-
-## 關鍵數據
-
-- **Git 追蹤檔案**: ~50 個（CLAUDE.md + settings + hooks + commands + memory atoms + tools + workflow）
-- **排除**: credentials、cache、session transcripts（.jsonl）、episodic/、_vectordb/、系統目錄
-- **Vector DB**: LanceDB（此電腦支援 AVX2）
+## 結構性規則
+- always-loaded 入口聖域：不放後設、版本沿革、hook 常數
+- 記憶分層：global / shared / role / personal/{user}；範疇 core（`memory/`，全專案注入）vs local（`_AIDocs/_atoms/`，只在 ~/.claude 注入）
+- 規劃 vs 知識：`plans/` 短期；完成搬 `_AIDocs/DevHistory/{topic}/`
+- 子目錄詳細：`hooks/` → `Architecture.md`；`memory/`+realm → `SPEC_ATOM_V5.md`

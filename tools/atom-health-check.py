@@ -5,6 +5,7 @@ Usage:
   python atom-health-check.py --validate-refs   檢查 Related 完整性
   python atom-health-check.py --fix-refs        自動修復缺失的反向參照
   python atom-health-check.py --stale-check     列出 Last-used > 60 天的 atoms
+  python atom-health-check.py --deps-check      壞滅緣檢查（path 型 Depends 存在性）
   python atom-health-check.py --report          生成完整健康報告
   python atom-health-check.py --report --json   JSON 格式輸出
 """
@@ -19,14 +20,40 @@ if sys.stderr.encoding != 'utf-8':
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
 
+# Single source of truth: lib/atom_spec.py
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.atom_spec import (  # noqa: E402
+    is_atom_file, REQUIRED_METADATA, parse_depends, resolve_depends_path,
+)
+from lib.atom_locations import iter_atom_files_multi, atom_search_roots  # noqa: E402
+from lib.atom_io import write_raw  # noqa: E402  走 funnel：EOL-preserving + audit（杜絕 bypass 裸寫）
+from lib.atom_access import read_access  # noqa: E402  計數欄居 sidecar <atom>.access.json
+
 MEMORY_ROOT = Path.home() / ".claude" / "memory"
-SKIP_FILES = {"MEMORY.md", "SPEC_Atomic_Memory_System.md"}
-SKIP_DIRS = {"_distant", "_staging", "_vectordb", "episodic"}
+GLOBAL_MEMORY_ROOT = Path.home() / ".claude" / "memory"
+AIDOCS_ROOT = Path.home() / ".claude" / "_AIDocs"
+EXTRA_SCAN_ROOTS: list[Path] = []  # populated from CLI; searched as fallback for ref resolution
 # Central hub atoms — skip reverse-link warnings for these
-CENTRAL_HUBS = {"decisions", "spec"}
+# (hub docs don't back-reference every detail doc that points to them)
+# - decisions / decisions-architecture / spec：全域決策與規範 hub
+# - feedback-pointer-atom：指標型 atom 設計原則 meta-rule，被多個 atoms 引用作為設計依據
+CENTRAL_HUBS = {"decisions", "decisions-architecture", "spec", "feedback-pointer-atom"}
+
+# Shadow detection: atom 段落抄 _AIDocs md 子段落 → warning
+SHADOW_THRESHOLD_DEFAULT = 0.7
+SHADOW_SECTIONS = ("印象", "知識")
+SHADOW_MIN_LEN = 80  # 太短的段落比對結果不可信 (e.g. "(none)" 或單句)
+NOISE_LINE_PATTERNS = [
+    re.compile(r'^\s*[-*]?\s*.*?→\s*_AIDocs/[^\s]+\.md.*$'),  # pointer 行
+    re.compile(r'^\s*@_AIDocs/.*$'),                           # @import 行
+    re.compile(r'^\s*_AIDocs/[^\s]+\.md\s*$'),                 # 純路徑行
+    re.compile(r'^\s*>\s*$'),                                  # 空 blockquote
+]
 
 
 def parse_memory_index(root: Path) -> dict[str, str]:
@@ -47,15 +74,23 @@ def parse_memory_index(root: Path) -> dict[str, str]:
 
 
 def find_atoms(root: Path) -> dict[str, Path]:
-    """Recursively find all .md atom files, return {name: path}."""
-    atoms = {}
-    for md in root.rglob("*.md"):
-        if md.name in SKIP_FILES:
-            continue
-        if any(part in SKIP_DIRS for part in md.relative_to(root).parts):
-            continue
-        name = md.stem
-        atoms[name] = md
+    """yield {stem: path} for all atom .md.
+
+    V5+: 若 root 為全域 memory，自動延伸掃 _AIDocs/Failures/（委派 lib.atom_locations）。
+    其他 root 維持單根 rglob + is_atom_file。
+    """
+    atoms: dict[str, Path] = {}
+    try:
+        is_global = root.resolve() == GLOBAL_MEMORY_ROOT.resolve()
+    except OSError:
+        is_global = False
+    if is_global:
+        for md in iter_atom_files_multi():
+            atoms[md.stem] = md
+    else:
+        for md in root.rglob("*.md"):
+            if is_atom_file(md, root):
+                atoms[md.stem] = md
     return atoms
 
 
@@ -116,6 +151,10 @@ def resolve_ref(ref: str, atoms: dict[str, Path], aliases: dict[str, str]) -> st
     # Last resort: check if file exists on disk (covers SKIP_FILES entries)
     for md in MEMORY_ROOT.rglob(f"{ref}.md"):
         return ref
+    # Cross-layer: fall back to extra roots (project → global up-ref is valid)
+    for extra in EXTRA_SCAN_ROOTS:
+        for md in extra.rglob(f"{ref}.md"):
+            return ref
     return None
 
 
@@ -134,6 +173,35 @@ def validate_refs(atoms: dict[str, Path], aliases: dict[str, str] | None = None)
                     "file": str(path),
                 })
     return issues
+
+
+def auto_fix_broken_refs(broken: list[dict]) -> list[dict]:
+    """Remove broken refs from their source atom's Related field.
+
+    Returns list of applied fixes. A broken ref means the target doesn't exist
+    in MEMORY_ROOT nor any EXTRA_SCAN_ROOTS, so removal is safe.
+    """
+    fixes = []
+    for b in broken:
+        path = Path(b["file"])
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        m = re.search(r"^- Related:\s*(.+)$", text, re.MULTILINE)
+        if not m:
+            continue
+        items = [i.strip() for i in m.group(1).split(",") if i.strip()]
+        missing = b["missing_ref"]
+        new_items = [i for i in items if i != missing]
+        if len(new_items) == len(items):
+            continue
+        new_line = f"- Related: {', '.join(new_items) if new_items else '(none)'}"
+        # 走 funnel：EOL-preserving _atomic_write + audit（裸 write_text 會在
+        # Windows 翻整檔 EOL 且不留稽核；仿 fix_reverse_refs 既有先例）
+        write_raw(path, text.replace(m.group(0), new_line, 1),
+                  source="tool:atom-health-check", op="broken-ref-remove")
+        fixes.append({"atom": b["atom"], "removed_ref": missing, "file": str(path)})
+    return fixes
 
 
 def check_reverse_refs(atoms: dict[str, Path], aliases: dict[str, str] | None = None) -> list[dict]:
@@ -234,7 +302,9 @@ def fix_reverse_refs(atoms: dict[str, Path], aliases: dict[str, str] | None = No
                 else:
                     text += f"\n- Related: {add_name}\n"
 
-        path_b.write_text(text, encoding="utf-8")
+        # 走 funnel：EOL-preserving _atomic_write + audit log
+        # （舊版裸 write_text 會在 Windows 翻整檔 EOL，且反向參照補全不留 audit）
+        write_raw(path_b, text, source="tool:atom-health-check", op="reverse-ref-add")
         fixes.append({
             "target": atom_b,
             "added_ref": add_name,
@@ -249,8 +319,7 @@ def stale_check(atoms: dict[str, Path], days: int = 60) -> list[dict]:
     cutoff = datetime.now() - timedelta(days=days)
     stale = []
     for name, path in sorted(atoms.items()):
-        fm = parse_frontmatter(path)
-        last_used = fm.get("Last-used", "")
+        last_used = read_access(path).get("last_used") or ""
         if not last_used:
             continue
         try:
@@ -268,7 +337,154 @@ def stale_check(atoms: dict[str, Path], days: int = 60) -> list[dict]:
     return stale
 
 
-def full_report(atoms: dict[str, Path], aliases: dict[str, str] | None = None) -> dict:
+def check_stale_deps(atoms: dict[str, Path]) -> list[dict]:
+    """壞滅緣（validity conditions）檢查：path 型 Depends 指向不存在的路徑。
+
+    只驗 path 型條目（自由文字型不可驗，僅展示）。warning 級：
+    知識失效是真值問題，非時間問題 — 依賴的路徑消失 = 該 atom 知識可能已壞滅。
+    無 Depends 欄的 atom 一律靜默（欄位 optional，向後相容）。
+    """
+    issues = []
+    for name, path in sorted(atoms.items()):
+        fm = parse_frontmatter(path)
+        raw = fm.get("Depends", "")
+        if not raw:
+            continue
+        for e in parse_depends(raw):
+            if e["type"] != "path" or not e["value"]:
+                continue
+            resolved = resolve_depends_path(e["value"])
+            if not resolved.exists():
+                issues.append({
+                    "atom": name,
+                    "dep": e["value"],
+                    "resolved": str(resolved),
+                    "file": str(path),
+                })
+    return issues
+
+
+def _strip_noise_lines(text: str) -> str:
+    """Remove pointer / @import / pure-path lines so they don't inflate ratios."""
+    kept = []
+    for line in text.splitlines():
+        if any(p.match(line) for p in NOISE_LINE_PATTERNS):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def _extract_section(text: str, heading: str) -> str:
+    """Extract content of `## {heading}` section (until next `## ` or EOF)."""
+    pattern = re.compile(
+        rf"^##\s+{re.escape(heading)}\s*$(.*?)(?=^##\s|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    m = pattern.search(text)
+    return m.group(1).strip() if m else ""
+
+
+def extract_atom_sections(atom_path: Path) -> dict[str, str]:
+    """Return {section_name: cleaned_text} for SHADOW_SECTIONS present in atom.
+    Empty / too-short sections are skipped.
+    """
+    text = atom_path.read_text(encoding="utf-8")
+    out = {}
+    for sec in SHADOW_SECTIONS:
+        body = _extract_section(text, sec)
+        if not body:
+            continue
+        cleaned = _strip_noise_lines(body)
+        if len(cleaned) < SHADOW_MIN_LEN:
+            continue
+        out[sec] = cleaned
+    return out
+
+
+def split_md_subsections(md_path: Path) -> list[tuple[str, str]]:
+    """Split _AIDocs md by `## ` heading. Return [(heading, body), ...].
+    Body before the first `## ` (under H1) is included as ('(preamble)', body).
+    """
+    text = md_path.read_text(encoding="utf-8")
+    sections: list[tuple[str, str]] = []
+    parts = re.split(r"^(##\s+.+)$", text, flags=re.MULTILINE)
+    # parts[0] = preamble (before first ## ); then alternating (heading, body)
+    if parts and parts[0].strip():
+        preamble = parts[0].strip()
+        if len(preamble) >= SHADOW_MIN_LEN:
+            sections.append(("(preamble)", preamble))
+    for i in range(1, len(parts), 2):
+        heading = parts[i].lstrip("#").strip()
+        body = parts[i + 1].strip() if i + 1 < len(parts) else ""
+        if len(body) >= SHADOW_MIN_LEN:
+            sections.append((heading, body))
+    return sections
+
+
+def _ratio_fast(a: str, b: str, threshold: float) -> float:
+    """SequenceMatcher.ratio with length-prefix early-exit.
+    If size disparity already precludes reaching threshold, return 0 without computing.
+    """
+    la, lb = len(a), len(b)
+    if la == 0 or lb == 0:
+        return 0.0
+    # Upper bound: 2 * min(la, lb) / (la + lb)
+    upper = (2 * min(la, lb)) / (la + lb)
+    if upper < threshold:
+        return 0.0
+    return SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
+def detect_shadow_atoms(
+    atoms: dict[str, Path],
+    aidocs_root: Path,
+    threshold: float = SHADOW_THRESHOLD_DEFAULT,
+    dry_run: bool = False,
+) -> list[dict]:
+    """For each (atom_section × md_subsection), compute SequenceMatcher.ratio.
+    - dry_run=True: return all pairs sorted by ratio desc (for distribution analysis)
+    - dry_run=False: return only pairs with ratio >= threshold (warnings)
+    """
+    if not aidocs_root.is_dir():
+        return []
+
+    md_subs: list[tuple[Path, str, str]] = []
+    for md in aidocs_root.rglob("*.md"):
+        # Skip _CHANGELOG / _CHANGELOG_ARCHIVE etc.; keep _INDEX.md (atoms may shadow it)
+        if md.name.startswith("_") and md.name != "_INDEX.md":
+            continue
+        for heading, body in split_md_subsections(md):
+            md_subs.append((md, heading, body))
+
+    results: list[dict] = []
+    for atom_name, atom_path in sorted(atoms.items()):
+        sections = extract_atom_sections(atom_path)
+        for sec_name, sec_text in sections.items():
+            for md_path, md_heading, md_body in md_subs:
+                # dry-run: use threshold=0 to capture full distribution
+                effective_thr = 0.0 if dry_run else threshold
+                r = _ratio_fast(sec_text, md_body, effective_thr)
+                if r >= (threshold if not dry_run else 0.0):
+                    if dry_run and r < 0.3:
+                        continue  # noise floor for dry-run report
+                    try:
+                        md_rel = str(md_path.relative_to(aidocs_root))
+                    except ValueError:
+                        md_rel = str(md_path)
+                    results.append({
+                        "atom": atom_name,
+                        "section": sec_name,
+                        "md_path": md_rel,
+                        "md_heading": md_heading,
+                        "ratio": round(r, 3),
+                    })
+
+    results.sort(key=lambda x: x["ratio"], reverse=True)
+    return results
+
+
+def full_report(atoms: dict[str, Path], aliases: dict[str, str] | None = None,
+                shadow_atoms: list[dict] | None = None) -> dict:
     """Generate complete health report."""
     aliases = aliases or {}
     report = {
@@ -279,36 +495,83 @@ def full_report(atoms: dict[str, Path], aliases: dict[str, str] | None = None) -
         "broken_refs": validate_refs(atoms, aliases),
         "missing_reverse_refs": check_reverse_refs(atoms, aliases),
         "stale_atoms": stale_check(atoms),
+        "stale_deps": check_stale_deps(atoms),
+        "shadow_atoms": shadow_atoms or [],
     }
 
     for name, path in sorted(atoms.items()):
         fm = parse_frontmatter(path)
+        acc = read_access(path)  # 計數欄居 sidecar <atom>.access.json
         related = parse_related(fm)
+        # V5+: atoms 可居 _AIDocs/Failures/，相對於 ~/.claude 計算
+        try:
+            file_rel = str(path.relative_to(MEMORY_ROOT))
+        except ValueError:
+            file_rel = str(path.relative_to(Path.home() / ".claude"))
         entry = {
             "name": name,
-            "file": str(path.relative_to(MEMORY_ROOT)),
+            "file": file_rel,
             "format": fm.get("_format", "unknown"),
             "confidence": fm.get("Confidence", "—"),
-            "last_used": fm.get("Last-used", "—"),
-            "confirmations": fm.get("Confirmations", "—"),
+            "last_used": acc.get("last_used") or "—",
+            "confirmations": acc.get("confirmations", "—"),
+            "readhits": acc.get("read_hits", "—"),
             "related": related,
             "issues": [],
         }
 
         # Check for missing standard fields
         if fm.get("_format") == "atom":
-            if not fm.get("Last-used"):
-                entry["issues"].append("missing Last-used")
-            if not fm.get("Confirmations"):
-                entry["issues"].append("missing Confirmations")
-            if not fm.get("Trigger"):
-                entry["issues"].append("missing Trigger")
+            # REQUIRED_METADATA from atom_spec — single source of truth
+            for k in REQUIRED_METADATA:
+                if not fm.get(k):
+                    entry["issues"].append(f"missing {k}")
+            # Tracking fields live in sidecar <atom>.access.json.
+            # confirmations=0 is normal for a tracked atom; only a missing
+            # sidecar (never tracked → first_seen is None) warrants a warning.
+            if acc.get("first_seen") is None:
+                entry["issues"].append("no access.json (never tracked)")
         elif fm.get("_format") == "claude-native":
             entry["issues"].append("claude-native format (no Last-used/Confirmations/Related)")
 
         report["atoms"].append(entry)
 
     return report
+
+
+def single_atom_report(name: str, atoms: dict[str, Path],
+                       aliases: dict[str, str] | None = None) -> dict:
+    """Filter full-library health results down to a single atom NAME.
+
+    Runs the existing whole-library detectors (validate_refs / check_reverse_refs /
+    stale_check) unchanged, then filters their output to items involving NAME.
+    Output is --report --json compatible (same keys: broken_refs /
+    missing_reverse_refs / stale_atoms), so callers can reuse the same parser.
+    """
+    aliases = aliases or {}
+
+    # broken_refs: only refs whose SOURCE atom == NAME (NAME pointing at a missing ref)
+    broken = [b for b in validate_refs(atoms, aliases) if b["atom"] == name]
+
+    # missing_reverse_refs: any reverse-ref issue involving NAME on either side
+    reverse = [r for r in check_reverse_refs(atoms, aliases)
+               if r["atom_a"] == name or r["atom_b"] == name]
+
+    # stale_atoms: NAME if it is in the stale list, else empty
+    stale = [s for s in stale_check(atoms) if s["atom"] == name]
+
+    # stale_deps: NAME 的壞滅緣觸發（path 型 Depends 指向已消失路徑）
+    deps = [d for d in check_stale_deps(atoms) if d["atom"] == name]
+
+    return {
+        "generated": datetime.now().isoformat(),
+        "atom": name,
+        "exists": name in atoms,
+        "broken_refs": broken,
+        "missing_reverse_refs": reverse,
+        "stale_atoms": stale,
+        "stale_deps": deps,
+    }
 
 
 def print_text_report(report: dict):
@@ -323,7 +586,7 @@ def print_text_report(report: dict):
         related_str = ", ".join(a["related"]) if a["related"] else "(none)"
         print(f"  {status} {a['name']}")
         print(f"     File: {a['file']} | Confidence: {a['confidence']}")
-        print(f"     Last-used: {a['last_used']} | Confirmations: {a['confirmations']}")
+        print(f"     Last-used: {a['last_used']} | Confirmations: {a['confirmations']} | ReadHits: {a['readhits']}")
         print(f"     Related: {related_str}")
         if a["issues"]:
             print(f"     Issues: {', '.join(a['issues'])}")
@@ -356,11 +619,32 @@ def print_text_report(report: dict):
     else:
         print("── Stale Atoms: None ✅ ──\n")
 
+    # 壞滅緣（validity conditions）— warning 級
+    if report.get("stale_deps"):
+        print("── 壞滅緣（Stale Depends）──")
+        for d in report["stale_deps"]:
+            print(f"  ⚠️ 壞滅緣觸發：atom {d['atom']} 依賴 {d['dep']} 已不存在")
+        print()
+    else:
+        print("── 壞滅緣（Stale Depends）: None ✅ ──\n")
+
+    # Shadow atoms (warning level — does NOT count toward issues_count)
+    if report.get("shadow_atoms"):
+        print("── Shadow Atoms (vs _AIDocs) ──")
+        for s in report["shadow_atoms"]:
+            print(f"  ⚠️  {s['atom']}::{s['section']}  ratio={s['ratio']:.2f}  → {s['md_path']}#{s['md_heading']}")
+        print()
+    elif "shadow_atoms" in report:
+        # Empty list means check ran but found nothing
+        # Skip the "(none)" line when --shadow-check was not requested at all.
+        pass
+
     # Summary
     issues_count = (
         len(report["broken_refs"])
         + len(report["missing_reverse_refs"])
         + len(report["stale_atoms"])
+        + len(report.get("stale_deps", []))
         + sum(1 for a in report["atoms"] if a["issues"])
     )
     if issues_count == 0:
@@ -373,14 +657,25 @@ def main():
     parser = argparse.ArgumentParser(description="Atom Health Check")
     parser.add_argument("--validate-refs", action="store_true", help="Check Related references exist")
     parser.add_argument("--fix-refs", action="store_true", help="Auto-fix missing reverse references")
+    parser.add_argument("--auto-fix-broken", action="store_true", help="Auto-remove broken Related refs from source atoms (unresolvable targets)")
     parser.add_argument("--stale-check", action="store_true", help="List atoms with Last-used > 60 days")
+    parser.add_argument("--deps-check", action="store_true",
+                        help="壞滅緣檢查：path 型 Depends 指向不存在路徑的 atoms")
     parser.add_argument("--stale-days", type=int, default=60, help="Stale threshold in days (default: 60)")
+    parser.add_argument("--shadow-check", action="store_true",
+                        help="Detect atom sections (## 印象 / ## 知識) shadowing _AIDocs md subsections")
+    parser.add_argument("--shadow-threshold", type=float, default=SHADOW_THRESHOLD_DEFAULT,
+                        help=f"Shadow similarity threshold (default: {SHADOW_THRESHOLD_DEFAULT})")
+    parser.add_argument("--shadow-dry-run", action="store_true",
+                        help="Print full ratio distribution (≥0.3) instead of filtering by threshold")
     parser.add_argument("--report", action="store_true", help="Full health report")
+    parser.add_argument("--atom", type=str, default=None,
+                        help="Report health issues for a single atom only (broken_refs/missing_reverse_refs/stale_atoms filtered to NAME)")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--memory-root", type=str, default=None, help="Override memory root path")
     args = parser.parse_args()
 
-    global MEMORY_ROOT
+    global MEMORY_ROOT, EXTRA_SCAN_ROOTS
     if args.memory_root:
         MEMORY_ROOT = Path(args.memory_root)
 
@@ -388,11 +683,58 @@ def main():
         print(f"Error: {MEMORY_ROOT} does not exist", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-enable cross-layer ref resolution when scanning a non-global root:
+    # project-layer atoms may legitimately reference global atoms (up-ref).
+    # Does NOT affect down-ref detection (global→project refs still flagged when
+    # scanning global, since MEMORY_ROOT will be global and project not in extras).
+    try:
+        if MEMORY_ROOT.resolve() != GLOBAL_MEMORY_ROOT.resolve():
+            # V5+: 全域 atom 不只居 memory/，亦含 _AIDocs/Failures/（feedback-* / cognitive-
+            # patterns）與 _AIDocs/_atoms/（local realm，可深層子目錄如 Tools/.../dotnet/）。
+            # 原本只放 global memory → 專案 atom 對這些他層 atom 的 up-ref 全被誤報 broken。
+            # 改用 atom_search_roots() 涵蓋三根，與 find_atoms 全域掃描範圍對齊；
+            # 真正不存在的 ref（任一根都找不到）仍正確回報。
+            EXTRA_SCAN_ROOTS = [r for r in atom_search_roots() if r.is_dir()]
+    except OSError:
+        pass
+
     atoms = find_atoms(MEMORY_ROOT)
     aliases = parse_memory_index(MEMORY_ROOT)
 
-    if not any([args.validate_refs, args.fix_refs, args.stale_check, args.report]):
+    if not any([args.validate_refs, args.fix_refs, args.auto_fix_broken,
+                args.stale_check, args.deps_check, args.shadow_check,
+                args.report, args.atom]):
         parser.print_help()
+        sys.exit(0)
+
+    if args.atom:
+        report = single_atom_report(args.atom, atoms, aliases)
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            if not report["exists"]:
+                print(f"⚠️ atom '{args.atom}' not found in {MEMORY_ROOT}")
+            print(f"=== Atom Health: {args.atom} ===")
+            if report["broken_refs"]:
+                for b in report["broken_refs"]:
+                    print(f"❌ {b['atom']} → {b['missing_ref']} (not found)")
+            else:
+                print("✅ No broken references.")
+            if report["missing_reverse_refs"]:
+                for r in report["missing_reverse_refs"]:
+                    print(f"⚠️ {r['direction']}")
+            else:
+                print("✅ No missing reverse references.")
+            if report["stale_atoms"]:
+                for s in report["stale_atoms"]:
+                    print(f"🕐 {s['atom']} — {s['last_used']} ({s['days_ago']}d ago)")
+            else:
+                print("✅ Not stale.")
+            if report["stale_deps"]:
+                for d in report["stale_deps"]:
+                    print(f"⚠️ 壞滅緣觸發：atom {d['atom']} 依賴 {d['dep']} 已不存在")
+            else:
+                print("✅ No stale depends.")
         sys.exit(0)
 
     if args.fix_refs:
@@ -405,6 +747,19 @@ def main():
             print(f"\nFixed {len(fixes)} missing reverse reference(s).")
         else:
             print("✅ No missing reverse references to fix.")
+        sys.exit(0)
+
+    if args.auto_fix_broken:
+        broken = validate_refs(atoms, aliases)
+        fixes = auto_fix_broken_refs(broken)
+        if args.json:
+            print(json.dumps({"fixes": fixes, "count": len(fixes)}, indent=2, ensure_ascii=False))
+        elif fixes:
+            for f in fixes:
+                print(f"✅ {f['atom']} — removed broken ref: {f['removed_ref']}")
+            print(f"\nRemoved {len(fixes)} broken reference(s).")
+        else:
+            print("✅ No broken references to fix.")
         sys.exit(0)
 
     if args.validate_refs:
@@ -435,8 +790,55 @@ def main():
         else:
             print(f"✅ No atoms older than {args.stale_days} days.")
 
+    elif args.deps_check:
+        deps = check_stale_deps(atoms)
+        if args.json:
+            print(json.dumps(deps, indent=2, ensure_ascii=False))
+        elif deps:
+            for d in deps:
+                print(f"⚠️ 壞滅緣觸發：atom {d['atom']} 依賴 {d['dep']} 已不存在")
+        else:
+            print("✅ No stale depends（所有 path 型 Depends 路徑存在）.")
+
+    elif args.shadow_check:
+        shadow = detect_shadow_atoms(
+            atoms, AIDOCS_ROOT,
+            threshold=args.shadow_threshold,
+            dry_run=args.shadow_dry_run,
+        )
+        if args.json:
+            print(json.dumps(shadow, indent=2, ensure_ascii=False))
+        elif args.shadow_dry_run:
+            print(f"=== Shadow Distribution (≥0.30, top {len(shadow)}) ===")
+            print(f"AIDocs root: {AIDOCS_ROOT}\n")
+            buckets = {"0.9+": 0, "0.8-0.9": 0, "0.7-0.8": 0, "0.5-0.7": 0, "0.3-0.5": 0}
+            for s in shadow:
+                r = s["ratio"]
+                if r >= 0.9: buckets["0.9+"] += 1
+                elif r >= 0.8: buckets["0.8-0.9"] += 1
+                elif r >= 0.7: buckets["0.7-0.8"] += 1
+                elif r >= 0.5: buckets["0.5-0.7"] += 1
+                else: buckets["0.3-0.5"] += 1
+            print("── Bucket counts ──")
+            for k, v in buckets.items():
+                print(f"  {k}: {v}")
+            print("\n── Top 30 pairs ──")
+            for s in shadow[:30]:
+                print(f"  {s['ratio']:.3f}  {s['atom']}::{s['section']}  → {s['md_path']}#{s['md_heading']}")
+        elif shadow:
+            print(f"⚠️ {len(shadow)} shadow warning(s) (threshold={args.shadow_threshold}):")
+            for s in shadow:
+                print(f"  {s['atom']}::{s['section']}  ratio={s['ratio']:.2f}  → {s['md_path']}#{s['md_heading']}")
+        else:
+            print(f"✅ No shadow atoms above threshold {args.shadow_threshold}.")
+
     elif args.report:
-        report = full_report(atoms, aliases)
+        shadow = []
+        if args.shadow_check or args.shadow_dry_run:
+            shadow = detect_shadow_atoms(atoms, AIDOCS_ROOT,
+                                         threshold=args.shadow_threshold,
+                                         dry_run=args.shadow_dry_run)
+        report = full_report(atoms, aliases, shadow_atoms=shadow)
         if args.json:
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:

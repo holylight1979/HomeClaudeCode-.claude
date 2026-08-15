@@ -2,10 +2,10 @@
 
 - Scope: global
 - Confidence: [固]
-- Trigger: 工具鏈, 環境設定, bash指令, command, bash, git, python, npm
-- Last-used: 2026-08-15
-- Confirmations: 128
-- Related: fail-env, toolchain-ollama, decisions-architecture, doc-index-system, feedback_global_install
+- Trigger: 工具鏈, 環境設定, MCPControl, MCP新增, npm全域, 螢幕截圖, Excel MCP, LanceDB, MSYS2, cp950, PowerShell截圖, 向量服務
+- Type: procedural
+- Tags: toolchain, environment, commands
+- Related: toolchain-ollama, decisions, feedback-global-install, cc-能力查證反編譯實跑-binary, codex-log-bloat-analytics, guardian-dashboard-孤兒佔埠與新碼重啟, wsl2-0x80070569-gpo鎖診斷繞法vhdx救援移除, headless-chrome-svg轉png-windows踩坑, bash-呼叫-msbuild-用-dash-參數, windows-python-write-text-缺-newline-把-lf-翻-crlf-整檔假-diff, winget-升不動-powershell-msi-與-msix-通道分裂, atom-write-global必須省略project-cwd
 
 ## 知識
 
@@ -54,7 +54,7 @@
 - [固] **一律全域安裝 + 絕對路徑**：`npm i -g {pkg}` → 用 `node.exe` + 絕對路徑指向 `AppData/Roaming/npm/node_modules/{pkg}/dist/{entry}.js`
 - [固] **禁用 npx 啟動**：`cmd /c npx` 在 VSCode 擴充環境不穩定，MCP server 會無法啟動
 - [固] 入口查找：`package.json` 的 `bin` 欄位確認 entry point
-- [固] 範本：`"command": "C:\\Program Files\\nodejs\\node.exe", "args": ["C:\\Users\\holyl\\AppData\\Roaming\\npm\\node_modules\\{pkg}\\dist\\{entry}.js"]`
+- [固] 範本：`"command": "C:\\Program Files\\nodejs\\node.exe", "args": ["C:\\Users\\holylight\\AppData\\Roaming\\npm\\node_modules\\{pkg}\\dist\\{entry}.js"]`
 
 ### 環境特殊配置
 
@@ -68,11 +68,3 @@
 - 環境問題 debug 時，優先查此 atom 再嘗試盲目探索
 - 版本資訊在確認後更新，不猜測
 
-## 演化日誌
-
-| 日期 | 變更 | 來源 |
-|------|------|------|
-| 2026-03-10 | 初始建立：從 hardware.md + decisions.md 整理已知工具鏈知識，4 大分類 | manual |
-| 2026-03-10 | [觀]→[固] 定期檢閱晉升，Confirmations=4 | periodic-review |
-| 2026-03-13 | Dual-Backend A/B 萃取品質實測 + generate() think 參數 + extract-worker think=true | ab-extract-test |
-| 2026-03-19 | 拆出 Ollama 區段至 toolchain-ollama.md，移除 path/路徑 trigger | atom-debug 精準化 |
