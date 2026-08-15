@@ -1713,21 +1713,6 @@
       "scope": "global"
     },
     {
-      "name": "doc-index-system",
-      "path": "_AIDocs/_atoms/MemDev/doc-index-system.md",
-      "triggers": [
-        "記憶系統架構",
-        "檔案結構",
-        "hook",
-        "skill",
-        "tool",
-        "記憶升級",
-        "記憶迭代",
-        "目錄結構"
-      ],
-      "scope": "global"
-    },
-    {
       "name": "ryujinx-cheats",
       "path": "_AIDocs/_atoms/World/ryujinx-cheats.md",
       "triggers": [
