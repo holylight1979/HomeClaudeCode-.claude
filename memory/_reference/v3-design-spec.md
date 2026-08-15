@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: V2.9, V3, 設計, 檢索強化, project-alias, ACT-R, multi-hop, blind-spot
-- Last-used: 2026-03-11
-- Confirmations: 0
+- Last-used: 2026-04-11
+- Confirmations: 1
 - Related: decisions, v3-research-insights
 
 ## 知識

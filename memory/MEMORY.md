@@ -24,6 +24,7 @@
 | feedback-no-test-to-svn | memory/feedback_no_test_to_svn.md | 上SVN, svn commit, 測試碼, 新手作業, 練習, 不可上傳 |
 | feedback-global-install | memory/feedback_global_install.md | 安裝MCP, 安裝skill, install MCP, install skill, add MCP, 新增MCP, 新增skill |
 | hardware | memory/hardware.md | 硬體, 電腦, 升級, hardware, PC, GPU, CPU, 顯卡, 記憶體, RAM, 主機板 |
+| ryujinx-cheats | memory/ryujinx-cheats.md | ryujinx, 龍神, switch模擬器, cheats, 金手指, 模組, mods, TID, BID, BuildID, enabled.txt, atmosphere, exefs, romfs, 人中之龍 |
 | self-iteration | memory/_reference/self-iteration.md | 自我迭代, self-iteration, 演進原則, 規則管理 |
 | v3-design-spec | memory/_reference/v3-design-spec.md | V2.9, V3, 檢索強化, project-alias, ACT-R, blind-spot |
 | v3-research-insights | memory/_reference/v3-research-insights.md | V3, 研究, 認知科學, 佛學, ACT-R, spreading activation |

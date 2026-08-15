@@ -91,3 +91,10 @@ Thumbs.db
 *~
 memory/mail-sorting.md
 memory/_vectordb/reindex.log
+
+# ─── Session process state (runtime, per-machine) ─────────
+sessions/
+.last-cleanup
+
+# ─── ACT-R access logs in nested memory dirs ──────────────
+memory/**/*.access.json

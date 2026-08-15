@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: svn, svn-update, TortoiseSVN, 衝突, conflict
-- Last-used: 2026-03-27
-- Confirmations: 96
+- Last-used: 2026-03-29
+- Confirmations: 97
 - Related: workflow-rules
 
 ## 知識

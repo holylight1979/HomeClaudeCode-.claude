@@ -2,11 +2,11 @@
   "projects": {
     "c--users-holyl--claude": {
       "root": "c:\\Users\\holyl\\.claude",
-      "last_seen": "2026-03-29"
+      "last_seen": "2026-08-15"
     },
     "e--openclaw": {
       "root": "e:\\OpenClaw",
-      "last_seen": "2026-03-29"
+      "last_seen": "2026-03-31"
     },
     "e--ai-develop-consciousness-stream": {
       "root": "e:\\AI-Develop\\consciousness-stream",
@@ -15,6 +15,14 @@
     "f--mud--gm": {
       "root": "f:\\Mud\\GM",
       "last_seen": "2026-03-29"
+    },
+    "e---openclaw": {
+      "root": "e:\\.openclaw",
+      "last_seen": "2026-03-30"
+    },
+    "c--users-holyl": {
+      "root": "C:\\Users\\holyl",
+      "last_seen": "2026-07-12"
     }
   }
 }

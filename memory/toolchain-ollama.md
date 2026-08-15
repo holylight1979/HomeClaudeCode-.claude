@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: ollama, dual-backend, rdchat, qwen3, embedding, 萃取品質, thinking, Open WebUI
-- Last-used: 2026-03-24
-- Confirmations: 67
+- Last-used: 2026-03-29
+- Confirmations: 68
 - Related: toolchain, decisions-architecture
 
 ## 知識

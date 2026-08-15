@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 架構細節, vector service, ollama backend, extraction, ACT-R, episodic tracking, context budget, 萃取, 注入, injection, vector, 向量, token budget
-- Last-used: 2026-03-29
-- Confirmations: 95
+- Last-used: 2026-03-30
+- Confirmations: 103
 - Related: decisions, toolchain, toolchain-ollama, doc-index-system, fail-silent, DESIGN_wisdom, SPEC_impl_params
 
 ## 知識

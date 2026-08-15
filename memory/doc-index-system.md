@@ -3,9 +3,9 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 記憶系統架構, 檔案結構, hook, skill, tool, 記憶升級, 記憶迭代, 目錄結構
-- Last-used: 2026-03-27
+- Last-used: 2026-04-11
 - Updated: 2026-03-23
-- Confirmations: 58
+- Confirmations: 67
 - Related: decisions, decisions-architecture, toolchain
 
 ## 知識

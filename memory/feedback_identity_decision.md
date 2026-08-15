@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 確認, 要刪嗎, 要改嗎, 你確認, 使用者確認, 問使用者
-- Last-used: 2026-03-29
-- Confirmations: 1
+- Last-used: 2026-04-11
+- Confirmations: 10
 
 ## 知識
 

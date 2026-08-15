@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [觀]
 - Trigger: V3, 研究, 認知科學, 佛學, 唯識, ACT-R, spreading activation
-- Last-used: 2026-03-11
-- Confirmations: 1
+- Last-used: 2026-04-11
+- Confirmations: 3
 - Related: decisions, v3-design-spec
 
 ## 知識

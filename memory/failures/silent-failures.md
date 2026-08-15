@@ -3,8 +3,8 @@
 - Scope: global
 - Confidence: [固]
 - Trigger: 靜默, silent, 看似正常, setdefault, knowledge_queue為空, 沒報錯但沒動作, 吞掉錯誤
-- Last-used: 2026-03-19
-- Confirmations: 36
+- Last-used: 2026-04-11
+- Confirmations: 37
 - Related: decisions-architecture, _INDEX
 
 ## 知識
